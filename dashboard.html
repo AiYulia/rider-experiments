@@ -1,0 +1,1150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Rider Experiments: ride-pooling test read-outs (synthetic data)</title>
+<meta name="description" content="A demo experiment dashboard for a fictional ride-pooling service: recovery campaign, midday discount, no-car alternatives and onboarding tests, with confidence intervals and the SQL behind each result. Synthetic data.">
+<style>:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --ink: #101826;
+  --muted: #586174;
+  --rule: #dfe3ea;
+  --accent: #0b7a83;
+  --accent-ink: #08646c;
+  --signal: #d98a1c;
+  --alert: #c8424f;
+  --accent-soft: rgba(11, 122, 131, 0.10);
+  --signal-soft: rgba(217, 138, 28, 0.14);
+  --alert-soft: rgba(200, 66, 79, 0.10);
+  --ink-soft: rgba(16, 24, 38, 0.05);
+  --shadow: 0 1px 2px rgba(16, 24, 38, 0.05), 0 4px 14px rgba(16, 24, 38, 0.04);
+  --signal-ink: #9a5d0c;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c121c;
+    --surface: #141c28;
+    --ink: #e9edf3;
+    --muted: #9aa4b4;
+    --rule: #253042;
+    --accent: #38b2bb;
+    --accent-ink: #5cc6ce;
+    --signal: #f0ad45;
+    --alert: #ef6b78;
+    --accent-soft: rgba(56, 178, 187, 0.14);
+    --signal-soft: rgba(240, 173, 69, 0.16);
+    --alert-soft: rgba(239, 107, 120, 0.14);
+    --ink-soft: rgba(233, 237, 243, 0.05);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --signal-ink: #f0ad45;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Inter", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.num, td.n, th.n, .kpi-value, .tnum { font-variant-numeric: tabular-nums; }
+a { color: var(--accent-ink); }
+h1, h2, h3, h4 { margin: 0; letter-spacing: -0.01em; }
+
+/* ---------- shell ---------- */
+.app { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 100vh; }
+.rail {
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  background: var(--surface); border-right: 1px solid var(--rule);
+  padding: 26px 22px 22px; display: flex; flex-direction: column; gap: 18px;
+}
+.brand { display: flex; gap: 12px; align-items: flex-start; }
+.brand svg { flex: none; margin-top: 2px; }
+.brand-name { font-size: 17px; font-weight: 700; line-height: 1.25; }
+.brand-sub { font-size: 12.5px; color: var(--muted); line-height: 1.4; margin-top: 2px; }
+.rail-label { font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.route { list-style: none; margin: 0; padding: 0; position: relative; }
+.stop { position: relative; }
+.stop a {
+  position: relative; display: flex; align-items: flex-start; gap: 14px;
+  padding: 9px 6px 9px 0; color: var(--muted); text-decoration: none; border-radius: 8px;
+}
+.stop a:hover { color: var(--ink); }
+.stop a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stop .dot {
+  flex: none; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%;
+  border: 4px solid var(--rule); background: var(--surface); position: relative; z-index: 2;
+  transition: border-color .15s, background .15s;
+}
+.stop:not(:last-child)::after {
+  content: ""; position: absolute; z-index: 1; left: 9px; top: 30px; bottom: -10px; width: 4px;
+  background: var(--rule); border-radius: 2px;
+}
+.stop.passed .dot { border-color: var(--accent); }
+.stop.passed::after { background: var(--accent); }
+.stop.active .dot { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 5px var(--accent-soft); }
+.stop.active a { color: var(--ink); }
+.stop .lbl { display: flex; flex-direction: column; font-size: 14.5px; font-weight: 600; line-height: 1.3; }
+.stop .lbl small { font-size: 12px; font-weight: 450; color: var(--muted); margin-top: 2px; }
+.rail-foot { margin-top: auto; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 650; white-space: nowrap;
+}
+.pill.synthetic { background: var(--signal-soft); color: var(--signal-ink); }
+.pill.synthetic::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--signal); }
+.pill.soft { background: var(--ink-soft); color: var(--muted); font-weight: 550; }
+
+main { min-width: 0; padding: 28px 36px 34px; }
+.topbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 10px 20px; margin-bottom: 20px; }
+.topbar h1 { font-size: 26px; font-weight: 700; line-height: 1.2; }
+.topbar p { margin: 4px 0 0; color: var(--muted); max-width: 70ch; }
+.topbar .tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.view[hidden] { display: none; }
+
+/* ---------- KPI tiles ---------- */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); gap: 14px; }
+.kpi {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 14px; padding: 14px 16px 10px;
+  box-shadow: var(--shadow); min-width: 0; display: flex; flex-direction: column;
+}
+.kpi-label { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.kpi-label::before {
+  content: ""; flex: none; width: 10px; height: 10px; border-radius: 50%;
+  border: 3px solid var(--accent); background: var(--surface);
+}
+.kpi.warn .kpi-label::before { border-color: var(--signal); }
+.kpi.bad .kpi-label::before { border-color: var(--alert); }
+.kpi.muted .kpi-label::before { border-color: var(--muted); }
+.eyebrow { font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+.kpi-value { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; margin-top: 8px; }
+.kpi-sub { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+.kpi-sub b { color: var(--ink); font-weight: 600; }
+.kpi .spark { height: 34px; margin-top: 8px; }
+
+/* ---------- cards ---------- */
+.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+.card {
+  grid-column: span 6; min-width: 0; background: var(--surface); border: 1px solid var(--rule);
+  border-radius: 14px; padding: 18px 20px 14px; box-shadow: var(--shadow);
+}
+.card.s12 { grid-column: span 12; }
+.card.s8 { grid-column: span 8; }
+.card.s7 { grid-column: span 7; }
+.card.s5 { grid-column: span 5; }
+.card.s4 { grid-column: span 4; }
+.card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 8px 16px; margin-bottom: 12px; }
+.card-head h3 { font-size: 15.5px; font-weight: 650; }
+.card-head p { margin: 3px 0 0; font-size: 13px; color: var(--muted); max-width: 72ch; }
+.card-foot { margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--rule); font-size: 11.5px; color: var(--muted); }
+.card-foot code { font-size: 11.5px; }
+.chart { position: relative; width: 100%; min-height: 40px; }
+.scroll-x { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); margin: 2px 0 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 14px; height: 4px; border-radius: 2px; display: inline-block; }
+.legend i.dot { width: 10px; height: 10px; border-radius: 50%; }
+.note { font-size: 13px; color: var(--muted); }
+.callout {
+  border-left: 4px solid var(--accent); background: var(--accent-soft); border-radius: 0 10px 10px 0;
+  padding: 10px 14px; font-size: 13.5px; margin-top: 10px;
+}
+.callout.amber { border-color: var(--signal); background: var(--signal-soft); }
+
+/* segmented toggle */
+.seg { display: inline-flex; flex-wrap: wrap; background: var(--ink-soft); border: 1px solid var(--rule); border-radius: 10px; padding: 3px; gap: 2px; }
+.seg button {
+  font: inherit; font-size: 12.5px; font-weight: 600; color: var(--muted); background: transparent;
+  border: 0; border-radius: 7px; padding: 5px 11px; cursor: pointer;
+}
+.seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.seg button:focus-visible { outline: 2px solid var(--accent); }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* tables */
+.tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tbl th { text-align: left; font-size: 11px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; padding: 7px 8px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+.tbl td { padding: 7px 8px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+.tbl tr:last-child td { border-bottom: 0; }
+.tbl td.n, .tbl th.n { text-align: right; font-variant-numeric: tabular-nums; }
+.tbl td.wrap { white-space: normal; min-width: 150px; }
+.tbl tbody tr:hover td { background: var(--ink-soft); }
+.tag { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--ink-soft); color: var(--muted); }
+.tag.ok { background: var(--accent-soft); color: var(--accent-ink); }
+.tag.warn { background: var(--signal-soft); color: var(--signal-ink); }
+.tag.bad { background: var(--alert-soft); color: var(--alert); }
+code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+code { font-size: 12.5px; background: var(--ink-soft); padding: 1px 5px; border-radius: 5px; }
+
+/* SQL + dictionary */
+details.sql { border: 1px solid var(--rule); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+details.sql summary {
+  cursor: pointer; list-style: none; padding: 10px 14px; display: flex; justify-content: space-between;
+  gap: 10px; font-weight: 600; font-size: 14px; align-items: center;
+}
+details.sql summary::-webkit-details-marker { display: none; }
+details.sql summary::before { content: "+"; color: var(--accent-ink); font-weight: 700; width: 12px; }
+details.sql[open] summary::before { content: "\2212"; }
+details.sql summary .sum-title { flex: 1; }
+details.sql summary .sum-val { color: var(--muted); font-weight: 550; font-variant-numeric: tabular-nums; }
+pre.code {
+  margin: 0; padding: 12px 14px; background: var(--ink-soft); border-top: 1px solid var(--rule);
+  font-size: 12.5px; line-height: 1.55; overflow-x: auto; white-space: pre; color: var(--ink);
+}
+pre.code .kw { color: var(--accent-ink); font-weight: 650; }
+pre.code .str { color: var(--signal-ink); }
+pre.code .cm { color: var(--muted); font-style: italic; }
+pre.code .fn { color: var(--alert); }
+.sql-def { padding: 8px 14px 0; font-size: 13px; color: var(--muted); }
+.stage-route { display: flex; align-items: center; gap: 0; margin: 4px 0 14px; overflow-x: auto; }
+.stage-route span { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 650; white-space: nowrap; }
+.stage-route span::before { content: ""; width: 14px; height: 14px; border-radius: 50%; border: 4px solid var(--accent); background: var(--surface); flex: none; }
+.stage-route i { flex: 1 0 28px; height: 4px; background: var(--accent); border-radius: 2px; margin: 0 8px; min-width: 28px; max-width: 120px; }
+.dict { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.dict-stage h4 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent-ink); margin-bottom: 8px; }
+.dict-table { border: 1px solid var(--rule); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+.dict-table .tname { font-weight: 650; font-size: 13.5px; }
+.dict-table .tdesc { font-size: 12.5px; color: var(--muted); margin: 2px 0 6px; }
+.dict-table dl { margin: 0; display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 4px 10px; font-size: 12.5px; }
+.dict-table dt code { font-size: 11.5px; white-space: nowrap; }
+.dict-table dd { margin: 0; color: var(--ink); }
+
+/* SVG chart parts */
+svg { display: block; overflow: visible; }
+svg text { font-family: inherit; font-variant-numeric: tabular-nums; }
+.ax text, .tick text { fill: var(--muted); font-size: 11px; }
+.ax line, .ax path { stroke: var(--rule); }
+.gridln { stroke: var(--rule); stroke-dasharray: 2 4; }
+.base { stroke: var(--muted); stroke-opacity: .5; }
+.ln { fill: none; stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+.ln.thin { stroke-width: 1.2; stroke-opacity: .5; }
+.c1 { stroke: var(--accent); fill: var(--accent); }
+.c2 { stroke: var(--signal); fill: var(--signal); }
+.c3 { stroke: var(--alert); fill: var(--alert); }
+.c4 { stroke: var(--muted); fill: var(--muted); }
+.c5 { stroke: var(--ink); fill: var(--ink); }
+.ln.c1, .ln.c2, .ln.c3, .ln.c4, .ln.c5 { fill: none; }
+.area { stroke: none; fill-opacity: .12; }
+.bar { stroke: none; }
+.bar:hover, .cell:hover { opacity: .8; }
+.band { fill: var(--signal-soft); }
+.band-lbl { fill: var(--signal-ink); font-size: 11px; font-weight: 650; }
+.marker { stroke: var(--muted); stroke-dasharray: 3 3; }
+.marker-lbl { fill: var(--muted); font-size: 11px; }
+.guide { stroke: var(--muted); stroke-opacity: .55; }
+.lbl-ink { fill: var(--ink); font-size: 12px; }
+.lbl-mut { fill: var(--muted); font-size: 11.5px; }
+.lbl-big { fill: var(--ink); font-size: 18px; font-weight: 700; }
+.lbl-stage { fill: var(--muted); font-size: 12px; font-weight: 600; }
+.lbl-acc { fill: var(--accent-ink); font-size: 12px; font-weight: 650; }
+.lbl-sig { fill: var(--signal-ink); font-size: 11.5px; font-weight: 600; }
+.route-main { fill: var(--accent); }
+.route-drop { fill: none; stroke: var(--signal); stroke-opacity: .75; stroke-linecap: round; }
+.route-stop { fill: var(--surface); stroke: var(--accent); stroke-width: 4; }
+.route-exit { fill: var(--surface); stroke: var(--signal); stroke-width: 3; }
+.cell { stroke: var(--surface); stroke-width: 1.5; }
+.ci-line { stroke-width: 2.5; stroke-linecap: round; }
+.hit { fill: transparent; stroke: none; }
+
+.tip {
+  position: fixed; z-index: 50; pointer-events: none; max-width: 260px;
+  background: var(--ink); color: var(--bg); border-radius: 8px; padding: 7px 10px;
+  font-size: 12.5px; line-height: 1.45; box-shadow: 0 6px 18px rgba(0,0,0,.18);
+  opacity: 0; transition: opacity .08s; font-variant-numeric: tabular-nums;
+}
+.tip.on { opacity: 1; }
+.tip b { font-weight: 650; }
+
+footer.site {
+  margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--rule);
+  font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: space-between;
+}
+
+/* ---------- responsive ---------- */
+@media (max-width: 1180px) {
+  .card, .card.s8, .card.s7, .card.s5, .card.s4 { grid-column: span 12; }
+  .card.half-md { grid-column: span 6; }
+}
+@media (max-width: 860px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .rail {
+    position: static; height: auto; overflow: visible; border-right: 0; border-bottom: 1px solid var(--rule);
+    padding: 14px 0 0; gap: 10px;
+  }
+  .brand { padding: 0 16px; }
+  .rail-label, .rail-foot { display: none; }
+  .route {
+    display: flex; overflow-x: auto; overflow-y: hidden; padding: 2px 8px 10px; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .route::-webkit-scrollbar { display: none; }
+  .stop { flex: none; width: 104px; }
+  .stop a { flex-direction: column; align-items: center; gap: 6px; padding: 6px 4px; text-align: center; }
+  .stop:not(:last-child)::after { left: 52px; right: -52px; width: auto; top: 15px; bottom: auto; height: 4px; }
+  .stop .lbl { font-size: 13px; align-items: center; }
+  .stop .lbl small { display: none; }
+  main { padding: 18px 14px 24px; }
+  .topbar h1 { font-size: 22px; }
+  .card.half-md { grid-column: span 12; }
+  .card { padding: 16px 14px 12px; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .kpi { padding: 12px 12px 8px; }
+  .kpi-value { font-size: 23px; }
+}
+@media (max-width: 360px) {
+  .kpis { grid-template-columns: minmax(0, 1fr); }
+}
+
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="brand">
+      <svg width="38" height="38" viewBox="0 0 38 38" aria-hidden="true">
+        <rect width="38" height="38" rx="11" fill="var(--accent)"/>
+        <path d="M8 13 L30 13" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+        <path d="M8 25 L30 25" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-opacity=".55"/>
+        <circle cx="12" cy="13" r="3.4" fill="#fff"/>
+        <circle cx="26" cy="13" r="3.4" fill="#fff"/>
+        <circle cx="12" cy="25" r="3.4" fill="var(--accent)" stroke="#fff" stroke-width="2.2"/>
+        <circle cx="26" cy="25" r="3.4" fill="var(--accent)" stroke="#fff" stroke-width="2.2"/>
+      </svg>
+      <div>
+        <div class="brand-name">Rider Experiments</div>
+        <div class="brand-sub">Test read-outs for pooled rides in Halvenport, a fictional city</div>
+      </div>
+    </div>
+    <div class="rail-label">Stops on this route</div>
+    <ol class="route" id="route" aria-label="Dashboard sections"></ol>
+    <div class="rail-foot">
+      <span class="pill synthetic">Synthetic data</span>
+      <p id="rail-meta"></p>
+    </div>
+  </aside>
+  <main>
+    <div class="topbar">
+      <div>
+        <h1 id="view-title">Overview</h1>
+        <p id="view-desc"></p>
+      </div>
+      <div class="tags"><span class="pill synthetic">Synthetic data</span><span class="pill soft">May 1 to Oct 31 2026</span></div>
+    </div>
+    <section class="view" id="v-overview" hidden></section>
+    <section class="view" id="v-recovery" hidden></section>
+    <section class="view" id="v-midday" hidden></section>
+    <section class="view" id="v-alternatives" hidden></section>
+    <section class="view" id="v-onboarding" hidden></section>
+    <section class="view" id="v-data" hidden></section>
+    <footer class="site">
+      <span>Synthetic data. Every rider, district, and number is generated; none of it is real data from any company.</span>
+      <span>Halvenport and its eight districts are fictional.</span>
+    </footer>
+  </main>
+</div>
+<script id="data" type="application/json">{"meta":{"city":"Halvenport","start":"2026-05-01","end":"2026-10-31","riders":40448,"districts":["Harborside","Old Mill","Northgate","Riverbend","Market Square","Eastfield","Lakeview","Station Quarter"]},"recovery":{"send":"2026-08-17","targeted":17037,"arms":{"treatment":{"n":11959,"k":1387,"rate":0.116,"lo":0.1102,"hi":0.1217},"control":{"n":5078,"k":387,"rate":0.0762,"lo":0.0689,"hi":0.0835}},"effect":{"diff":0.0398,"lo":0.0305,"hi":0.0491,"rel":0.5218,"p":0.0},"extra_riders":476,"cumulative":{"treatment":[0.0052,0.0126,0.0166,0.0211,0.0257,0.0324,0.0376,0.0419,0.0463,0.0508,0.0555,0.0595,0.0649,0.0698,0.0739,0.0778,0.0812,0.0848,0.0886,0.0935,0.0969,0.1007,0.1026,0.1038,0.1064,0.1085,0.1115,0.1131,0.1146,0.116],"control":[0.0033,0.0067,0.0091,0.0128,0.0148,0.0201,0.0221,0.025,0.0276,0.0313,0.0339,0.038,0.0414,0.0439,0.0463,0.0496,0.0506,0.053,0.0545,0.0581,0.0605,0.0607,0.0626,0.065,0.067,0.0697,0.0723,0.0733,0.074,0.0762]},"buckets":[{"label":"31 to 60 days","treatment":{"n":2052,"k":584,"rate":0.2846,"lo":0.2651,"hi":0.3041},"control":{"n":845,"k":211,"rate":0.2497,"lo":0.2205,"hi":0.2789},"effect":{"diff":0.0349,"lo":-0.0002,"hi":0.07,"rel":0.1398,"p":0.0514}},{"label":"61 to 120 days","treatment":{"n":3038,"k":401,"rate":0.132,"lo":0.12,"hi":0.144},"control":{"n":1355,"k":111,"rate":0.0819,"lo":0.0673,"hi":0.0965},"effect":{"diff":0.0501,"lo":0.0312,"hi":0.069,"rel":0.6113,"p":0.0}},{"label":"Over 120 days","treatment":{"n":6869,"k":402,"rate":0.0585,"lo":0.053,"hi":0.0641},"control":{"n":2878,"k":65,"rate":0.0226,"lo":0.0172,"hi":0.028},"effect":{"diff":0.0359,"lo":0.0282,"hi":0.0437,"rel":1.5913,"p":0.0}}]},"midday":{"weeks":["2026-06-01","2026-06-08","2026-06-15","2026-06-22","2026-06-29","2026-07-06","2026-07-13","2026-07-20","2026-07-27","2026-08-03","2026-08-10","2026-08-17"],"pre_weeks":4,"groups":{"test":{"districts":["Eastfield","Lakeview","Market Square","Riverbend"],"share":[0.1919,0.1924,0.1772,0.1938,0.217,0.2335,0.2305,0.2185,0.221,0.2172,0.2096,0.2102],"unfilled_rush":[162,170,151,179,81,128,61,111,83,66,125,151],"unfilled_index":[97.8852,102.719,91.2387,108.1571,48.9426,77.3414,36.858,67.0695,50.1511,39.8792,75.5287,91.2387],"share_pre":0.1888,"share_test":0.2196,"rides_pre":14362,"rides_test":27738,"unf_week_pre":165.5,"unf_week_test":100.75,"rush_fill_pre":0.9237,"rush_fill_test":0.9482},"control":{"districts":["Harborside","Northgate","Old Mill","Station Quarter"],"share":[0.183,0.1872,0.1845,0.1853,0.1879,0.1813,0.1878,0.1868,0.1804,0.1822,0.1849,0.1828],"unfilled_rush":[159,315,203,387,266,199,200,265,246,198,272,246],"unfilled_index":[59.7744,118.4211,76.3158,145.4887,100.0,74.812,75.188,99.6241,92.4812,74.4361,102.2556,92.4812],"share_pre":0.185,"share_test":0.1843,"rides_pre":17741,"rides_test":34873,"unf_week_pre":266.0,"unf_week_test":236.5,"rush_fill_pre":0.9018,"rush_fill_test":0.9104}},"share_did":0.0315,"unf_change_test":-0.3912,"unf_change_control":-0.1109,"unf_net":-0.3153,"pairs":[{"test":"Market Square","control":"Station Quarter"},{"test":"Riverbend","control":"Harborside"},{"test":"Lakeview","control":"Old Mill"},{"test":"Eastfield","control":"Northgate"}]},"alternatives":{"start":"2026-06-01","offers":30668,"accepted":7418,"rate":0.2419,"by_type":[{"type":"later_pickup","label":"Later pickup","n":10193,"k":3496,"rate":0.343,"lo":0.3338,"hi":0.3522,"weekday_rush":{"n":3971,"k":1020,"rate":0.2569,"lo":0.2433,"hi":0.2705},"other":{"n":6222,"k":2476,"rate":0.3979,"lo":0.3858,"hi":0.4101},"median_wait":18.9,"completed":2975},{"type":"nearby_point","label":"Nearby pickup point","n":10326,"k":2460,"rate":0.2382,"lo":0.23,"hi":0.2465,"weekday_rush":{"n":3883,"k":954,"rate":0.2457,"lo":0.2321,"hi":0.2592},"other":{"n":6443,"k":1506,"rate":0.2337,"lo":0.2234,"hi":0.2441},"median_wait":8.0,"completed":2316},{"type":"shared_walk","label":"Shared ride, short walk","n":10149,"k":1462,"rate":0.1441,"lo":0.1372,"hi":0.1509,"weekday_rush":{"n":3808,"k":525,"rate":0.1379,"lo":0.1269,"hi":0.1488},"other":{"n":6341,"k":937,"rate":0.1478,"lo":0.139,"hi":0.1565},"median_wait":9.1,"completed":1374}],"weekly":{"weeks":["2026-06-01","2026-06-08","2026-06-15","2026-06-22","2026-06-29","2026-07-06","2026-07-13","2026-07-20","2026-07-27","2026-08-03","2026-08-10","2026-08-17","2026-08-24","2026-08-31","2026-09-07","2026-09-14","2026-09-21","2026-09-28","2026-10-05","2026-10-12","2026-10-19","2026-10-26"],"offers":[959,1165,1056,1452,1250,1055,994,1209,1094,893,1071,1203,1349,1721,1845,2313,1574,1632,1853,2364,1579,1037],"accepted":[215,312,263,317,304,265,259,286,273,222,261,299,328,441,451,549,360,373,453,552,371,264],"later_pickup":[0.3262,0.3308,0.3667,0.3096,0.3515,0.3449,0.3994,0.3563,0.3557,0.3519,0.3324,0.3832,0.3387,0.3818,0.3644,0.3189,0.3352,0.3396,0.3222,0.3239,0.3123,0.3596],"nearby_point":[0.2343,0.3015,0.2199,0.2168,0.2275,0.2753,0.2184,0.2067,0.2565,0.2618,0.265,0.2209,0.2505,0.2387,0.2334,0.2334,0.2135,0.2144,0.2444,0.2207,0.2532,0.2829],"shared_walk":[0.1148,0.1667,0.1577,0.125,0.1474,0.1514,0.1469,0.147,0.1281,0.1438,0.1303,0.1512,0.1386,0.1459,0.1377,0.1508,0.13,0.1353,0.1633,0.159,0.1412,0.135]},"best":"later_pickup","best_vs_worst":{"diff":0.1989,"lo":0.1875,"hi":0.2104,"rel":1.3809,"p":0.0}},"onboarding":{"start":"2026-08-03","end":"2026-10-11","variants":{"six_screen":{"screens":6,"stages":[{"label":"Started sign-up","n":5818},{"label":"Welcome","n":5629},{"label":"Phone check","n":4991},{"label":"Name and email","n":4619},{"label":"Payment","n":3709},{"label":"Home address","n":3401},{"label":"Notifications","n":3230},{"label":"Booked within 7 days","n":2089},{"label":"First ride within 7 days","n":1860}],"account":{"n":5818,"k":3230,"rate":0.5552,"lo":0.5424,"hi":0.5679},"booked7":{"n":5818,"k":2089,"rate":0.3591,"lo":0.3467,"hi":0.3714},"ride7":{"n":5818,"k":1860,"rate":0.3197,"lo":0.3077,"hi":0.3317},"cohorts":[{"week":"2026-08-03","n":576,"k":189,"rate":0.3281,"lo":0.2898,"hi":0.3665},{"week":"2026-08-10","n":523,"k":164,"rate":0.3136,"lo":0.2738,"hi":0.3533},{"week":"2026-08-17","n":504,"k":160,"rate":0.3175,"lo":0.2768,"hi":0.3581},{"week":"2026-08-24","n":575,"k":169,"rate":0.2939,"lo":0.2567,"hi":0.3311},{"week":"2026-08-31","n":558,"k":190,"rate":0.3405,"lo":0.3012,"hi":0.3798},{"week":"2026-09-07","n":594,"k":181,"rate":0.3047,"lo":0.2677,"hi":0.3417},{"week":"2026-09-14","n":659,"k":215,"rate":0.3263,"lo":0.2905,"hi":0.362},{"week":"2026-09-21","n":628,"k":212,"rate":0.3376,"lo":0.3006,"hi":0.3746},{"week":"2026-09-28","n":593,"k":191,"rate":0.3221,"lo":0.2845,"hi":0.3597},{"week":"2026-10-05","n":608,"k":189,"rate":0.3109,"lo":0.2741,"hi":0.3476}],"ride7_given_account":{"n":3230,"k":1860,"rate":0.5759,"lo":0.5588,"hi":0.5929}},"four_screen":{"screens":4,"stages":[{"label":"Started sign-up","n":5903},{"label":"Welcome","n":5742},{"label":"Phone check","n":5043},{"label":"Payment","n":4170},{"label":"Ready to ride","n":4054},{"label":"Booked within 7 days","n":2336},{"label":"First ride within 7 days","n":2069}],"account":{"n":5903,"k":4054,"rate":0.6868,"lo":0.6749,"hi":0.6986},"booked7":{"n":5903,"k":2336,"rate":0.3957,"lo":0.3833,"hi":0.4082},"ride7":{"n":5903,"k":2069,"rate":0.3505,"lo":0.3383,"hi":0.3627},"cohorts":[{"week":"2026-08-03","n":544,"k":210,"rate":0.386,"lo":0.3451,"hi":0.4269},{"week":"2026-08-10","n":547,"k":181,"rate":0.3309,"lo":0.2915,"hi":0.3703},{"week":"2026-08-17","n":545,"k":205,"rate":0.3761,"lo":0.3355,"hi":0.4168},{"week":"2026-08-24","n":560,"k":194,"rate":0.3464,"lo":0.307,"hi":0.3858},{"week":"2026-08-31","n":585,"k":197,"rate":0.3368,"lo":0.2985,"hi":0.375},{"week":"2026-09-07","n":592,"k":203,"rate":0.3429,"lo":0.3047,"hi":0.3811},{"week":"2026-09-14","n":598,"k":214,"rate":0.3579,"lo":0.3194,"hi":0.3963},{"week":"2026-09-21","n":649,"k":227,"rate":0.3498,"lo":0.3131,"hi":0.3865},{"week":"2026-09-28","n":640,"k":229,"rate":0.3578,"lo":0.3207,"hi":0.395},{"week":"2026-10-05","n":643,"k":209,"rate":0.325,"lo":0.2888,"hi":0.3612}],"ride7_given_account":{"n":4054,"k":2069,"rate":0.5104,"lo":0.495,"hi":0.5257}}},"effect":{"diff":0.0308,"lo":0.0137,"hi":0.0479,"rel":0.0963,"p":0.0004},"account_effect":{"diff":0.1316,"lo":0.1142,"hi":0.149,"rel":0.237,"p":0.0}},"docs":{"dictionary":[{"stage":"Sign-up","tables":[{"name":"onboarding_sessions","desc":"One row each time someone starts the sign-up flow in the app.","cols":[["session_id","Unique ID of the sign-up attempt."],["started_on","Day the first screen was shown."],["variant","six_screen or four_screen during the test (Aug 3 to Oct 11), six_screen_pre_test before it."],["screens_completed","How many screens the person got through."],["account_created","True when every screen was completed."],["rider_id","The new rider account, when one was created."]]}]},{"stage":"Booking","tables":[{"name":"booking_requests","desc":"One row for every ride a rider asks for, filled or not.","cols":[["booking_id","Unique ID of the request."],["requested_at","When the rider tapped Book."],["pickup_district","District of the pickup point."],["status","'filled' or 'unfilled' (\"No car available\")."]]},{"name":"alt_offers","desc":"One row per alternative shown after \"No car available\". Each unfilled request gets one alternative, picked at random.","cols":[["alt_type","later_pickup, nearby_point or shared_walk."],["time_band","weekday_rush (07:00 to 09:59, 16:00 to 18:59) or other."],["accepted","True when the rider took it. An accepted offer becomes a ride."]]},{"name":"midday_test_districts","desc":"Which districts got the weekday midday discount, Jun 29 to Aug 23.","cols":[["district","District name."],["test_group","'test' or 'control', picked by coin flip within matched pairs."]]}]},{"stage":"Ride","tables":[{"name":"rides","desc":"One row for every booking that got a car.","cols":[["ride_type","'direct' or 'alternative' (from an accepted offer)."],["wait_min","Minutes from booking to pickup."],["ride_status","'completed', 'cancelled' or 'not_completed'."],["pickup_at","When the rider got in."]]}]},{"stage":"Repeat","tables":[{"name":"recovery_sends","desc":"Lapsed riders picked for the recovery campaign on Aug 17. 70% got the offer, 30% were held out.","cols":[["rider_id","The lapsed rider."],["arm","'treatment' (got the offer) or 'control' (held out)."],["days_since_last_ride","Days between the last completed ride and the send."]]}]}],"sql":{"recovery":"-- Recovery campaign: 30-day rebook rate by arm with a 95% confidence interval.\n-- Rebooked = a completed ride from a booking made Aug 17 to Sep 15 (30 days from the send).\nWITH rebooks AS (\n    SELECT DISTINCT r.rider_id\n    FROM rides_db.core.rides r\n    JOIN rides_db.core.booking_requests b\n      ON b.booking_id = r.booking_id\n    WHERE r.ride_status = 'completed'\n      AND b.requested_at::DATE BETWEEN '2026-08-17' AND '2026-09-15'\n)\nSELECT s.arm,\n       COUNT(*)                                       AS riders,\n       COUNT(rb.rider_id)                             AS rebooked,\n       ROUND(rebooked / riders, 4)                    AS rebook_rate,\n       rebook_rate - 1.96 * SQRT(rebook_rate * (1 - rebook_rate) / riders) AS ci_low,\n       rebook_rate + 1.96 * SQRT(rebook_rate * (1 - rebook_rate) / riders) AS ci_high\nFROM growth_db.experiments.recovery_sends s\nLEFT JOIN rebooks rb\n       ON rb.rider_id = s.rider_id\nGROUP BY s.arm;","midday":"-- Midday discount: share of weekday completed rides that start 10:00 to 14:59,\n-- by district group, before (Jun 1 to Jun 28) and during (Jun 29 to Aug 23) the test.\nSELECT t.test_group,\n       IFF(b.requested_at::DATE < '2026-06-29', 'pre', 'test')      AS period,\n       COUNT(*)                                                     AS weekday_rides,\n       COUNT_IF(HOUR(b.requested_at) BETWEEN 10 AND 14)             AS midday_rides,\n       ROUND(midday_rides / weekday_rides, 4)                       AS midday_share\nFROM rides_db.core.rides r\nJOIN rides_db.core.booking_requests b ON b.booking_id = r.booking_id\nJOIN growth_db.experiments.midday_test_districts t ON t.district = b.pickup_district\nWHERE r.ride_status = 'completed'\n  AND DAYOFWEEKISO(b.requested_at) <= 5\n  AND b.requested_at::DATE BETWEEN '2026-06-01' AND '2026-08-23'\nGROUP BY 1, 2\nORDER BY 1, 2;","rush":"-- Unfilled rush-hour requests per week by district group (weekdays, 07-09 and 16-18).\nSELECT t.test_group,\n       DATE_TRUNC('WEEK', b.requested_at)::DATE                    AS week_start,\n       COUNT_IF(b.status = 'unfilled')                              AS unfilled_rush_requests\nFROM rides_db.core.booking_requests b\nJOIN growth_db.experiments.midday_test_districts t ON t.district = b.pickup_district\nWHERE DAYOFWEEKISO(b.requested_at) <= 5\n  AND (HOUR(b.requested_at) BETWEEN 7 AND 9 OR HOUR(b.requested_at) BETWEEN 16 AND 18)\n  AND b.requested_at::DATE BETWEEN '2026-06-01' AND '2026-08-23'\nGROUP BY 1, 2\nORDER BY 1, 2;","alternatives":"-- \"No car available\" alternatives: acceptance rate by type, Jun 1 to Oct 31.\nSELECT alt_type,\n       COUNT(*)                                                     AS offers,\n       COUNT_IF(accepted)                                           AS accepted,\n       ROUND(accepted / offers, 4)                                  AS acceptance_rate,\n       acceptance_rate - 1.96 * SQRT(acceptance_rate * (1 - acceptance_rate) / offers) AS ci_low,\n       acceptance_rate + 1.96 * SQRT(acceptance_rate * (1 - acceptance_rate) / offers) AS ci_high\nFROM rides_db.core.alt_offers\nWHERE offered_at::DATE BETWEEN '2026-06-01' AND '2026-10-31'\nGROUP BY alt_type\nORDER BY acceptance_rate DESC;","onboarding":"-- Onboarding test: share of sign-up starts with a completed first ride within 7 days.\nWITH first_ride AS (\n    SELECT rider_id, MIN(pickup_at) AS first_pickup_at\n    FROM rides_db.core.rides\n    WHERE ride_status = 'completed'\n    GROUP BY rider_id\n)\nSELECT s.variant,\n       COUNT(*)                                                                  AS sessions,\n       COUNT_IF(s.account_created)                                               AS accounts,\n       COUNT_IF(f.first_pickup_at < DATEADD(DAY, 7, s.started_on::TIMESTAMP))    AS first_ride_7d,\n       ROUND(first_ride_7d / sessions, 4)                                        AS first_ride_7d_rate\nFROM growth_db.experiments.onboarding_sessions s\nLEFT JOIN first_ride f ON f.rider_id = s.rider_id\nWHERE s.started_on BETWEEN '2026-08-03' AND '2026-10-11'\n  AND s.variant IN ('six_screen', 'four_screen')\nGROUP BY s.variant;"}},"samples":{"recovery_sends":{"cols":["rider_id","send_date","arm","days_since_last_ride"],"num":["rider_id","days_since_last_ride"],"rows":[[101889,"2026-08-17","treatment",42],[101973,"2026-08-17","control",189],[102086,"2026-08-17","control",372],[102832,"2026-08-17","treatment",461],[104484,"2026-08-17","treatment",31],[109577,"2026-08-17","treatment",224],[109707,"2026-08-17","treatment",309],[109977,"2026-08-17","treatment",441],[111366,"2026-08-17","treatment",163],[111657,"2026-08-17","control",89],[114467,"2026-08-17","treatment",389],[115420,"2026-08-17","control",86],[115888,"2026-08-17","treatment",168],[116294,"2026-08-17","control",142],[116846,"2026-08-17","treatment",103],[117186,"2026-08-17","treatment",42],[117653,"2026-08-17","treatment",153],[119529,"2026-08-17","treatment",147],[120207,"2026-08-17","control",49],[125550,"2026-08-17","treatment",41]]},"alt_offers":{"cols":["offer_id","booking_id","offered_at","alt_type","time_band","accepted"],"num":["offer_id","booking_id"],"rows":[[9001344,5062033,"2026-06-09 17:51:49","shared_walk","weekday_rush","false"],[9002083,5069655,"2026-06-14 15:21:55","shared_walk","other","false"],[9004732,5094598,"2026-06-29 16:36:41","nearby_point","weekday_rush","false"],[9005065,5097802,"2026-07-01 09:39:20","shared_walk","weekday_rush","true"],[9005968,5105846,"2026-07-06 11:56:20","later_pickup","other","true"],[9010868,5158237,"2026-08-08 11:38:13","later_pickup","other","false"],[9011159,5160782,"2026-08-10 09:32:10","later_pickup","weekday_rush","false"],[9013663,5186372,"2026-08-25 20:50:12","nearby_point","other","true"],[9014312,5191616,"2026-08-28 17:03:37","nearby_point","weekday_rush","false"],[9015265,5199288,"2026-09-02 09:30:10","nearby_point","weekday_rush","false"],[9016762,5210131,"2026-09-08 12:02:03","later_pickup","other","true"],[9019360,5226315,"2026-09-16 15:01:01","later_pickup","other","false"],[9020784,5235732,"2026-09-21 16:51:43","nearby_point","weekday_rush","false"],[9021473,5241882,"2026-09-24 17:02:15","shared_walk","weekday_rush","true"],[9022798,5251890,"2026-09-30 09:11:02","shared_walk","weekday_rush","false"],[9023237,5255375,"2026-10-01 19:50:00","shared_walk","other","false"],[9023299,5256038,"2026-10-02 08:26:10","later_pickup","weekday_rush","false"],[9023865,5260610,"2026-10-05 08:07:18","later_pickup","weekday_rush","false"],[9027381,5284184,"2026-10-16 21:28:16","nearby_point","other","false"],[9029757,5300923,"2026-10-26 17:07:33","later_pickup","weekday_rush","false"]]},"onboarding_sessions":{"cols":["session_id","started_on","variant","screens_total","screens_completed","account_created","rider_id"],"num":["session_id","screens_total","screens_completed","rider_id"],"rows":[[715908,"2026-08-10","six_screen",6,6,"true",131859],[716651,"2026-08-14","four_screen",4,4,"true",132307],[717577,"2026-08-21","six_screen",6,1,"false",""],[718148,"2026-08-24","six_screen",6,4,"false",""],[718428,"2026-08-26","six_screen",6,6,"true",133396],[719310,"2026-08-31","six_screen",6,6,"true",133909],[719868,"2026-09-04","six_screen",6,6,"true",134275],[719886,"2026-09-04","six_screen",6,3,"false",""],[721375,"2026-09-13","four_screen",4,1,"false",""],[722143,"2026-09-17","four_screen",4,1,"false",""],[722608,"2026-09-20","four_screen",4,4,"true",135983],[722769,"2026-09-21","four_screen",4,4,"true",136084],[722969,"2026-09-22","six_screen",6,1,"false",""],[723762,"2026-09-26","four_screen",4,2,"false",""],[724197,"2026-09-29","six_screen",6,3,"false",""],[724518,"2026-09-30","four_screen",4,1,"false",""],[724631,"2026-10-01","six_screen",6,6,"true",137251],[725293,"2026-10-05","six_screen",6,6,"true",137659],[725775,"2026-10-07","four_screen",4,2,"false",""],[726482,"2026-10-11","four_screen",4,4,"true",138406]]},"midday_test_districts":{"cols":["district","test_group","discount_hours","test_start","test_end"],"num":[],"rows":[["Harborside","control","none","2026-06-29","2026-08-23"],["Old Mill","control","none","2026-06-29","2026-08-23"],["Northgate","control","none","2026-06-29","2026-08-23"],["Riverbend","test","10:00 to 14:59 weekdays","2026-06-29","2026-08-23"],["Market Square","test","10:00 to 14:59 weekdays","2026-06-29","2026-08-23"],["Eastfield","test","10:00 to 14:59 weekdays","2026-06-29","2026-08-23"],["Lakeview","test","10:00 to 14:59 weekdays","2026-06-29","2026-08-23"],["Station Quarter","control","none","2026-06-29","2026-08-23"]]}}}</script>
+<script>"use strict";
+/* Shared shell + inline SVG chart helpers. No external libraries. */
+const SVGNS = "http://www.w3.org/2000/svg";
+const $ = (q, r = document) => r.querySelector(q);
+const $$ = (q, r = document) => Array.from(r.querySelectorAll(q));
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MINUS = "−";
+
+function h(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const k in attrs || {}) {
+    const v = attrs[k];
+    if (v == null) continue;
+    if (k === "class") e.className = v;
+    else if (k === "html") e.innerHTML = v;
+    else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) if (c != null && c !== false) e.append(c);
+  return e;
+}
+function sv(tag, attrs, parent) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs || {}) if (attrs[k] != null) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function stext(parent, x, y, str, cls, anchor, extra) {
+  const t = sv("text", Object.assign({ x, y, class: cls || "", "text-anchor": anchor || "start" }, extra || {}), parent);
+  t.textContent = str;
+  return t;
+}
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+const NF = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const neg = (s) => s.replace(/^-/, MINUS);
+const fmt = {
+  int: (v) => neg(NF.format(Math.round(v))),
+  pct: (v, d = 1) => neg((v * 100).toFixed(d)) + "%",
+  pct0: (v) => neg((v * 100).toFixed(0)) + "%",
+  pts: (v, d = 1) => { const a = Math.abs(v * 100).toFixed(d); return (+a === 0 ? "" : v >= 0 ? "+" : MINUS) + a + " pts"; },
+  signedPct: (v, d = 1) => { const a = Math.abs(v * 100).toFixed(d); return (+a === 0 ? "" : v >= 0 ? "+" : MINUS) + a + "%"; },
+  min: (v, d = 1) => v.toFixed(d) + " min",
+  dec: (v, d = 2) => neg(v.toFixed(d)),
+  compact: (v) => (Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(2) + "M" : Math.abs(v) >= 1e4 ? (v / 1e3).toFixed(1) + "k" : NF.format(v)),
+};
+function dlabel(iso, withYear) {
+  const p = iso.split("-").map(Number);
+  return MON[p[1] - 1] + " " + p[2] + (withYear ? " " + p[0] : "");
+}
+
+/* ---------- tooltip ---------- */
+const TIP = h("div", { class: "tip", role: "tooltip" });
+function tipShow(html, ev) {
+  TIP.innerHTML = html;
+  TIP.classList.add("on");
+  tipMove(ev);
+}
+function tipMove(ev) {
+  const pad = 14, w = TIP.offsetWidth, hh = TIP.offsetHeight;
+  let x = ev.clientX + pad, y = ev.clientY + pad;
+  if (x + w > window.innerWidth - 6) x = Math.max(6, ev.clientX - w - pad);
+  if (y + hh > window.innerHeight - 6) y = Math.max(6, ev.clientY - hh - pad);
+  TIP.style.left = x + "px";
+  TIP.style.top = y + "px";
+}
+function tipHide() { TIP.classList.remove("on"); }
+document.addEventListener("pointerover", (ev) => {
+  const t = ev.target.closest && ev.target.closest("[data-tip]");
+  if (t) tipShow(t.getAttribute("data-tip"), ev);
+});
+document.addEventListener("pointermove", (ev) => {
+  if (!TIP.classList.contains("on")) return;
+  const t = ev.target.closest && ev.target.closest("[data-tip]");
+  if (t) tipMove(ev); else tipHide();
+});
+document.addEventListener("pointerout", (ev) => {
+  const t = ev.target.closest && ev.target.closest("[data-tip]");
+  const to = ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest("[data-tip]");
+  if (t && !to) tipHide();
+});
+window.addEventListener("scroll", tipHide, { passive: true });
+
+/* ---------- chart mounting ---------- */
+function mount(host, draw) {
+  host._draw = draw;
+  host._w = 0;
+  return host;
+}
+function paint(root) {
+  $$(".chart", root || document).forEach((c) => {
+    if (!c._draw || c.offsetParent === null) return;
+    const w = Math.floor(c.clientWidth);
+    if (!w || w === c._w) return;
+    c._w = w;
+    c.innerHTML = "";
+    c._draw(c, w);
+  });
+}
+function repaint(host) { host._w = 0; paint(host.parentNode); }
+
+/* ---------- scales ---------- */
+function niceStep(span, n) {
+  const raw = span / Math.max(1, n), mag = Math.pow(10, Math.floor(Math.log10(raw))), r = raw / mag;
+  return (r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10) * mag;
+}
+function niceDomain(lo, hi, n) {
+  if (hi === lo) hi = lo + 1;
+  const st = niceStep(hi - lo, n);
+  const a = Math.floor(lo / st + 1e-9) * st, b = Math.ceil(hi / st - 1e-9) * st;
+  const ticks = [];
+  for (let v = a; v <= b + st * 1e-6; v += st) ticks.push(+v.toFixed(10));
+  return { lo: a, hi: b, ticks };
+}
+const lin = (d0, d1, r0, r1) => (v) => r0 + ((v - d0) / (d1 - d0 || 1)) * (r1 - r0);
+const textW = (s, px) => String(s).length * (px || 11) * 0.6;
+function fitText(str, maxW, px) {
+  let s = String(str);
+  if (textW(s, px) <= maxW) return s;
+  while (s.length > 4 && textW(s + "\u2026", px) > maxW) s = s.slice(0, -1);
+  return s.trimEnd() + "\u2026";
+}
+
+function svgRoot(host, w, hgt) {
+  return sv("svg", { width: w, height: hgt, viewBox: `0 0 ${w} ${hgt}`, role: "img" }, host);
+}
+
+/* ---------- line chart ---------- */
+function lineChart(host, w, o) {
+  const H = o.height || 240, n = o.x.length;
+  const all = o.series.flatMap((s) => s.values.filter((v) => v != null));
+  let lo = o.yMin != null ? o.yMin : Math.min(...all), hi = o.yMax != null ? o.yMax : Math.max(...all);
+  if (o.yMin == null) { const pad = (hi - lo) * 0.12 || Math.abs(hi) * 0.1 || 1; lo -= pad; hi += pad * 0.4; }
+  const dom = niceDomain(lo, hi, o.yTicks || 4);
+  const yf = o.yFmt || fmt.int;
+  const ml = Math.max(...dom.ticks.map((t) => textW(yf(t)))) + 12, mr = o.mr || 14, mt = o.mt || 14, mb = 26;
+  const svg = svgRoot(host, w, H);
+  const x = lin(0, n - 1, ml, w - mr), y = lin(dom.lo, dom.hi, H - mb, mt);
+  const step = n > 1 ? (w - ml - mr) / (n - 1) : 0;
+  (o.bands || []).forEach((b) => {
+    const x0 = x(b.from) - step / 2, x1 = x(b.to) + step / 2;
+    sv("rect", { x: Math.max(ml, x0), y: mt - 4, width: Math.min(w - mr, x1) - Math.max(ml, x0), height: H - mb - mt + 4, class: "band" }, svg);
+    if (b.label) stext(svg, Math.max(ml, x0) + 6, mt + 8, b.label, "band-lbl");
+  });
+  const g = sv("g", { class: "ax" }, svg);
+  dom.ticks.forEach((t) => {
+    sv("line", { x1: ml, x2: w - mr, y1: y(t), y2: y(t), class: "gridln" }, g);
+    stext(g, ml - 8, y(t) + 4, yf(t), "", "end");
+  });
+  sv("line", { x1: ml, x2: w - mr, y1: H - mb, y2: H - mb }, g);
+  const xf = o.xFmt || ((v) => v);
+  const minGap = o.xGap || 74;
+  let every = Math.max(1, Math.ceil(minGap / Math.max(step, 1)));
+  if (o.xEvery) every = Math.max(every, o.xEvery);
+  for (let i = 0; i < n; i += every) stext(g, x(i), H - mb + 17, xf(o.x[i], i), "", n === 1 ? "middle" : i === 0 && step * every < 60 ? "start" : "middle");
+  (o.markers || []).forEach((m) => {
+    sv("line", { x1: x(m.at), x2: x(m.at), y1: mt - 4, y2: H - mb, class: "marker" }, svg);
+    let anchor = m.anchor || "start";
+    if (anchor === "start" && x(m.at) + 5 + textW(m.label, 11) > w) anchor = "end";
+    if (anchor === "end" && x(m.at) - 5 - textW(m.label, 11) < 0) anchor = "start";
+    stext(svg, x(m.at) + (anchor === "end" ? -5 : 5), mt + 8 + (m.dy || 0), m.label, "marker-lbl", anchor);
+  });
+  (o.refs || []).forEach((r) => {
+    sv("line", { x1: ml, x2: w - mr, y1: y(r.y), y2: y(r.y), class: "marker" }, svg);
+    if (r.label) stext(svg, w - mr, y(r.y) - 5, r.label, "marker-lbl", "end");
+  });
+  o.series.forEach((s) => {
+    let d = "", da = "", pen = false, first = null, lastX = null;
+    s.values.forEach((v, i) => {
+      if (v == null) { pen = false; return; }
+      const px = x(i).toFixed(1), py = y(v).toFixed(1);
+      d += (pen ? "L" : "M") + px + " " + py;
+      if (s.area) { if (first == null) first = px; da += (da ? "L" : "M") + px + " " + py; lastX = px; }
+      pen = true;
+    });
+    if (s.area && da) sv("path", { d: da + `L${lastX} ${H - mb}L${first} ${H - mb}Z`, class: "area " + s.cls }, svg);
+    sv("path", { d, class: "ln " + s.cls + (s.thin ? " thin" : ""), "stroke-dasharray": s.dash || null, "stroke-width": s.width || null }, svg);
+    if (s.dots) s.values.forEach((v, i) => { if (v != null) sv("circle", { cx: x(i), cy: y(v), r: 3.2, class: s.cls }, svg); });
+  });
+  if (o.endLabels) o.series.forEach((s) => {
+    const i = s.values.length - 1;
+    if (s.values[i] != null && s.label !== false) stext(svg, x(i) + 6, y(s.values[i]) + 4, s.endLabel || "", "lbl-mut");
+  });
+  if (o.tip) {
+    const guide = sv("line", { x1: 0, x2: 0, y1: mt, y2: H - mb, class: "guide", visibility: "hidden" }, svg);
+    const hit = sv("g", {}, svg);
+    for (let i = 0; i < n; i++) {
+      const r = sv("rect", { x: x(i) - Math.max(step, 2) / 2, y: mt, width: Math.max(step, 2), height: H - mb - mt, class: "hit", "data-tip": o.tip(i) }, hit);
+      r.addEventListener("pointerenter", () => { guide.setAttribute("x1", x(i)); guide.setAttribute("x2", x(i)); guide.setAttribute("visibility", "visible"); });
+    }
+    hit.addEventListener("pointerleave", () => guide.setAttribute("visibility", "hidden"));
+  }
+  return svg;
+}
+
+/* ---------- vertical bars (grouped) ---------- */
+function barChart(host, w, o) {
+  const H = o.height || 230, n = o.labels.length, ns = o.series.length;
+  const all = o.series.flatMap((s) => s.values);
+  const dom = niceDomain(Math.min(0, ...all), Math.max(...all) * 1.05, o.yTicks || 4);
+  const yf = o.yFmt || fmt.int;
+  const ml = Math.max(...dom.ticks.map((t) => textW(yf(t)))) + 12, mr = 8, mt = o.valueLabels ? 18 : 10, mb = 26;
+  const svg = svgRoot(host, w, H);
+  const y = lin(dom.lo, dom.hi, H - mb, mt);
+  const bw = (w - ml - mr) / n, inner = bw * (o.gap != null ? 1 - o.gap : 0.72), sw = inner / ns;
+  const g = sv("g", { class: "ax" }, svg);
+  dom.ticks.forEach((t) => {
+    sv("line", { x1: ml, x2: w - mr, y1: y(t), y2: y(t), class: "gridln" }, g);
+    stext(g, ml - 8, y(t) + 4, yf(t), "", "end");
+  });
+  sv("line", { x1: ml, x2: w - mr, y1: y(0), y2: y(0), class: "base" }, svg);
+  const every = Math.max(1, Math.ceil((o.xGap || 34) / bw));
+  o.labels.forEach((lb, i) => {
+    const cx = ml + bw * i + bw / 2;
+    if (i % every === 0) stext(g, cx, H - mb + 16, (o.xFmt || ((v) => v))(lb, i), "", "middle");
+    o.series.forEach((s, j) => {
+      const v = s.values[i], x0 = cx - inner / 2 + sw * j;
+      const y0 = y(Math.max(0, v)), hgt = Math.abs(y(v) - y(0));
+      const cls = typeof s.cls === "function" ? s.cls(i) : s.cls;
+      sv("rect", { x: x0 + 0.5, y: y0, width: Math.max(1, sw - 1), height: Math.max(0.5, hgt), rx: Math.min(3, sw / 4), class: "bar " + cls, "data-tip": o.tip ? o.tip(i, j) : null }, svg);
+      if (o.valueLabels) stext(svg, x0 + sw / 2, y0 - 5, (o.vFmt || yf)(v), "lbl-mut", "middle");
+    });
+  });
+  return svg;
+}
+
+/* ---------- horizontal bars ---------- */
+function hbarChart(host, w, o) {
+  const rows = o.rows, rh = o.rowH || 30, bh = o.barH || 16;
+  const lw = Math.min(w * 0.42, Math.max(...rows.map((r) => textW(r.label, 12.5))) + 12);
+  const vf = o.fmt || fmt.int;
+  const vw = Math.max(...rows.map((r) => textW(r.valueLabel != null ? r.valueLabel : vf(r.value), 12))) + 10;
+  const H = rows.length * rh + 6;
+  const svg = svgRoot(host, w, H);
+  const minV = Math.min(0, ...rows.map((r) => r.value)), maxV = o.max != null ? o.max : Math.max(0, ...rows.map((r) => r.value));
+  const x0 = lw, x1 = w - vw;
+  const x = lin(minV, maxV || 1, x0, x1);
+  if (minV < 0) sv("line", { x1: x(0), x2: x(0), y1: 0, y2: H, class: "base" }, svg);
+  rows.forEach((r, i) => {
+    const cy = i * rh + rh / 2;
+    const lab = stext(svg, lw - 10, cy + 4, fitText(r.label, lw - 12, 12.5), "lbl-ink", "end");
+    if (lab.textContent !== r.label) lab.setAttribute("data-tip", esc(r.label));
+    const a = x(Math.min(0, r.value)), b = x(Math.max(0, r.value));
+    sv("rect", { x: x0, y: cy - bh / 2, width: x1 - x0, height: bh, rx: 4, fill: "var(--ink-soft)" }, svg);
+    sv("rect", { x: a, y: cy - bh / 2, width: Math.max(1, b - a), height: bh, rx: 4, class: "bar " + (r.cls || "c1"), "data-tip": r.tip || null }, svg);
+    const lx = r.value < 0 && minV < 0 ? Math.min(a, x(0)) - 6 : Math.max(b, x0) + 6;
+    stext(svg, r.value < 0 && minV < 0 ? x1 + 6 : lx, cy + 4, r.valueLabel != null ? r.valueLabel : vf(r.value), "lbl-ink", "start", { "font-weight": 600 });
+  });
+  return svg;
+}
+
+/* ---------- distribution range (p10..p90, p25..p75, median) ---------- */
+function rangeChart(host, w, o) {
+  const rows = o.rows, rh = 34;
+  const lw = Math.max(...rows.map((r) => textW(r.label, 12.5))) + 14;
+  const H = rows.length * rh + 28;
+  const svg = svgRoot(host, w, H);
+  const dom = niceDomain(0, Math.max(...rows.map((r) => r.p90)) * 1.05, 5);
+  const x = lin(dom.lo, dom.hi, lw, w - 50);
+  const g = sv("g", { class: "ax" }, svg);
+  dom.ticks.forEach((t) => {
+    sv("line", { x1: x(t), x2: x(t), y1: 0, y2: H - 22, class: "gridln" }, g);
+    stext(g, x(t), H - 6, (o.tickFmt || String)(t), "", "middle");
+  });
+  rows.forEach((r, i) => {
+    const cy = i * rh + rh / 2 + 2;
+    stext(svg, lw - 10, cy + 4, r.label, "lbl-ink", "end");
+    const tip = o.tip ? o.tip(r) : null;
+    sv("line", { x1: x(r.p10), x2: x(r.p90), y1: cy, y2: cy, class: "c4", "stroke-width": 2, "stroke-opacity": 0.6 }, svg);
+    sv("rect", { x: x(r.p25), y: cy - 8, width: Math.max(2, x(r.p75) - x(r.p25)), height: 16, rx: 5, class: "bar " + (r.cls || "c1"), "fill-opacity": 0.35 }, svg);
+    sv("circle", { cx: x(r.p50), cy, r: 6, class: "route-stop", "stroke-width": 3 }, svg);
+    sv("rect", { x: lw, y: cy - rh / 2, width: w - lw, height: rh, class: "hit", "data-tip": tip }, svg);
+    stext(svg, x(r.p90) + 8, cy + 4, (o.valFmt || String)(r.p50), "lbl-mut");
+  });
+  return svg;
+}
+
+/* ---------- heatmap ---------- */
+function heatmap(host, w, o) {
+  const nr = o.rows.length, nc = o.cols.length;
+  const lw = Math.max(...o.rows.map((r) => textW(r, 12.5))) + 12;
+  const cw = Math.max(o.minCell || 28, (w - lw - 4) / nc), ch = o.cellH || 30;
+  const W = Math.ceil(lw + cw * nc + 4), H = nr * ch + 26;
+  const svg = svgRoot(host, W, H);
+  let mx = 0;
+  o.values.forEach((row) => row.forEach((v) => (mx = Math.max(mx, v))));
+  o.values.forEach((row, i) => {
+    stext(svg, lw - 8, i * ch + ch / 2 + 4, o.rows[i], "lbl-ink", "end");
+    row.forEach((v, j) => {
+      const op = mx ? 0.05 + 0.95 * Math.pow(v / mx, 0.85) : 0.05;
+      sv("rect", { x: lw + j * cw, y: i * ch, width: cw, height: ch, rx: 3, class: "cell " + (o.cls || "c3"), "fill-opacity": op.toFixed(3), "data-tip": o.tip ? o.tip(i, j, v) : null }, svg);
+    });
+  });
+  const g = sv("g", { class: "ax" }, svg);
+  const every = cw < 30 ? 2 : 1;
+  o.cols.forEach((c, j) => { if (j % every === 0) stext(g, lw + j * cw + cw / 2, nr * ch + 17, c, "", "middle"); });
+  return { svg, max: mx };
+}
+function heatLegend(host, max, cls, f) {
+  const svg = sv("svg", { width: 230, height: 30, viewBox: "0 0 230 30" }, host);
+  for (let i = 0; i < 10; i++) sv("rect", { x: 40 + i * 15, y: 4, width: 15, height: 10, class: cls, "fill-opacity": (0.05 + 0.95 * Math.pow(i / 9, 0.85)).toFixed(3) }, svg);
+  stext(svg, 34, 13, f(0), "lbl-mut", "end");
+  stext(svg, 196, 13, f(max), "lbl-mut", "start");
+  return svg;
+}
+
+/* ---------- confidence-interval dot plot ---------- */
+function ciChart(host, w, o) {
+  const rows = o.rows, rh = o.rowH || 40;
+  const lw = Math.min(w * 0.4, Math.max(...rows.map((r) => textW(r.label, 12.5))) + 14);
+  const f = o.fmt || fmt.pct;
+  const vw = Math.max(...rows.map((r) => textW(f(r.est), 12.5))) + 16;
+  const H = rows.length * rh + 26;
+  const svg = svgRoot(host, w, H);
+  let lo = Math.min(...rows.map((r) => r.lo)), hi = Math.max(...rows.map((r) => r.hi));
+  if (o.zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+  if (o.min != null) lo = Math.min(lo, o.min);
+  const padv = (hi - lo) * 0.08;
+  const dom = niceDomain(o.min != null ? Math.max(o.min, lo - padv) : lo - padv, hi + padv, 5);
+  const x = lin(dom.lo, dom.hi, lw, w - vw);
+  const g = sv("g", { class: "ax" }, svg);
+  dom.ticks.forEach((t) => {
+    sv("line", { x1: x(t), x2: x(t), y1: 0, y2: H - 22, class: "gridln" }, g);
+    stext(g, x(t), H - 6, (o.tickFmt || f)(t), "", "middle");
+  });
+  if (o.zero) sv("line", { x1: x(0), x2: x(0), y1: 0, y2: H - 22, class: "base" }, svg);
+  rows.forEach((r, i) => {
+    const cy = i * rh + rh / 2;
+    stext(svg, lw - 12, cy + 4, fitText(r.label, lw - 14, 12.5), "lbl-ink", "end");
+    if (r.sub) stext(svg, lw - 12, cy + 18, r.sub, "lbl-mut", "end");
+    sv("line", { x1: x(r.lo), x2: x(r.hi), y1: cy, y2: cy, class: "ci-line " + (r.cls || "c1") }, svg);
+    sv("line", { x1: x(r.lo), x2: x(r.lo), y1: cy - 6, y2: cy + 6, class: "ci-line " + (r.cls || "c1") }, svg);
+    sv("line", { x1: x(r.hi), x2: x(r.hi), y1: cy - 6, y2: cy + 6, class: "ci-line " + (r.cls || "c1") }, svg);
+    sv("circle", { cx: x(r.est), cy, r: 7, class: r.cls || "c1", stroke: "var(--surface)", "stroke-width": 2.5 }, svg);
+    stext(svg, w - vw + 10, cy + 4, f(r.est), "lbl-ink", "start", { "font-weight": 650 });
+    sv("rect", { x: lw, y: cy - rh / 2, width: w - lw, height: rh, class: "hit", "data-tip": r.tip || `<b>${esc(r.label)}</b><br>${f(r.est)} (95% CI ${f(r.lo)} to ${f(r.hi)})` }, svg);
+  });
+  return svg;
+}
+
+/* ---------- route-line funnel (transit map motif) ---------- */
+function routeFunnel(host, w, o) {
+  const st = o.stages, k = st.length, n0 = st[0].n;
+  const thick = (n) => (o.thin ? 4 : 6) + (o.thin ? 14 : 24) * (n / n0);
+  const compact = !!o.compact;
+  if (w >= (o.minHorizontal || 560)) {
+    const H = compact ? 150 : 250, padL = o.padL || 62, padR = o.padR || 62;
+    const ly = compact ? 72 : 104;
+    const svg = svgRoot(host, w, H);
+    const xs = st.map((_, i) => padL + (i * (w - padL - padR)) / (k - 1));
+    const gap = xs[1] - xs[0];
+    for (let i = 0; i < k - 1; i++) {
+      const t = thick(st[i + 1].n);
+      sv("rect", { x: xs[i], y: ly - t / 2, width: gap, height: t, class: "route-main" }, svg);
+      const drop = st[i].n - st[i + 1].n;
+      if (!compact && drop > 0) {
+        const dw = Math.max(2, 22 * (drop / n0));
+        const bx0 = xs[i] + 14, bx1 = xs[i] + gap * 0.5, by1 = ly + 62;
+        sv("path", { d: `M${bx0} ${ly}C${bx0 + gap * 0.25} ${ly} ${bx1} ${ly + 20} ${bx1} ${by1}`, class: "route-drop", "stroke-width": dw }, svg);
+        sv("circle", { cx: bx1, cy: by1, r: 5, class: "route-exit" }, svg);
+        const dl = o.drops ? o.drops[i] : "";
+        stext(svg, bx1, by1 + 22, MINUS + fmt.int(drop), "lbl-sig", "middle");
+        wrapText(svg, bx1, by1 + 38, dl, Math.max(80, gap - 16), "lbl-mut", "middle");
+        sv("rect", { x: bx0, y: ly + 10, width: gap * 0.6, height: by1 + 46 - ly, class: "hit", "data-tip": `<b>${esc(dl)}</b><br>${fmt.int(drop)} (${fmt.pct(drop / st[i].n)} of the previous stop)` }, svg);
+      }
+    }
+    st.forEach((s, i) => {
+      const r = thick(s.n) / 2 + 6;
+      sv("circle", { cx: xs[i], cy: ly, r, class: "route-stop", "data-tip": s.tip || null }, svg);
+      const anchor = "middle";
+      const topY = ly - (compact ? 18 : 30) - (o.thin ? 2 : 10);
+      stext(svg, xs[i], topY, compact ? fmt.pct(s.n / n0, 1) : fmt.int(s.n), compact ? "lbl-ink" : "lbl-big", anchor, compact ? { "font-weight": 650 } : null);
+      wrapText(svg, xs[i], topY - (compact ? 30 : 38), s.label, Math.max(70, gap - 10), "lbl-stage", anchor, true);
+      if (!compact && i > 0) stext(svg, xs[i], ly + thick(s.n) / 2 + 26, fmt.pct(s.n / st[i - 1].n) + " of prev.", "lbl-acc", "middle");
+      if (compact) stext(svg, xs[i], ly + r + 18, fmt.int(s.n), "lbl-mut", "middle");
+    });
+    return svg;
+  }
+  // vertical layout for narrow screens
+  const rowH = compact ? 50 : 78, lx = 26;
+  const H = (k - 1) * rowH + 50;
+  const svg = svgRoot(host, w, H);
+  const ys = st.map((_, i) => 22 + i * rowH);
+  for (let i = 0; i < k - 1; i++) {
+    const t = thick(st[i + 1].n);
+    sv("rect", { x: lx - t / 2, y: ys[i], width: t, height: rowH, class: "route-main" }, svg);
+  }
+  st.forEach((s, i) => {
+    const r = thick(s.n) / 2 + 5;
+    sv("circle", { cx: lx, cy: ys[i], r, class: "route-stop" }, svg);
+    const tx = lx + 30;
+    stext(svg, tx, ys[i] - 3, s.label, "lbl-stage");
+    const main = compact ? fmt.pct(s.n / n0) + "  ·  " + fmt.int(s.n) : fmt.int(s.n) + (i > 0 ? "   " + fmt.pct(s.n / st[i - 1].n) + " of prev." : "");
+    stext(svg, tx, ys[i] + 14, main, compact ? "lbl-ink" : "lbl-ink", "start", { "font-weight": 650 });
+    if (!compact && i < k - 1) {
+      const drop = s.n - st[i + 1].n;
+      stext(svg, tx, ys[i] + 36, MINUS + fmt.int(drop) + "  " + (o.drops ? o.drops[i] : ""), "lbl-sig");
+    }
+  });
+  return svg;
+}
+function wrapText(svg, x, y, str, maxW, cls, anchor, upward) {
+  const words = String(str).split(" ");
+  const lines = [];
+  let cur = "";
+  words.forEach((wd) => {
+    const t = cur ? cur + " " + wd : wd;
+    if (textW(t, 12) > maxW && cur) { lines.push(cur); cur = wd; } else cur = t;
+  });
+  if (cur) lines.push(cur);
+  const lh = 14;
+  const y0 = upward ? y - (lines.length - 1) * lh + 14 : y;
+  lines.forEach((ln, i) => stext(svg, x, y0 + i * lh, ln, cls, anchor));
+}
+
+/* ---------- sparkline ---------- */
+function spark(host, w, values, cls) {
+  const H = 34, n = values.length;
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const svg = svgRoot(host, w, H);
+  const x = lin(0, n - 1, 2, w - 4), y = lin(lo - (hi - lo) * 0.1, hi + (hi - lo) * 0.1 || 1, H - 3, 3);
+  let d = "";
+  values.forEach((v, i) => (d += (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1)));
+  sv("path", { d: d + `L${x(n - 1)} ${H}L${x(0)} ${H}Z`, class: "area " + (cls || "c1") }, svg);
+  sv("path", { d, class: "ln " + (cls || "c1"), "stroke-width": 1.8 }, svg);
+  sv("circle", { cx: x(n - 1), cy: y(values[n - 1]), r: 3, class: cls || "c1" }, svg);
+  return svg;
+}
+
+/* ---------- small HTML builders ---------- */
+function legend(items) {
+  return h("div", { class: "legend" }, items.map((it) => h("span", {}, h("i", { class: it.dot ? "dot" : "", style: `background:var(${it.color})` }), it.label)));
+}
+function kpiTile(o) {
+  const sp = o.spark ? h("div", { class: "chart spark" }) : null;
+  if (sp) mount(sp, (c, w) => spark(c, w, o.spark, o.sparkCls));
+  return h("div", { class: "kpi " + (o.tone || "") },
+    h("div", { class: "kpi-label" }, o.label),
+    h("div", { class: "kpi-value" }, o.value),
+    h("div", { class: "kpi-sub", html: o.sub || "" }),
+    sp);
+}
+function card(o, ...body) {
+  return h("section", { class: "card " + (o.span || ""), "data-team": o.team || null },
+    h("div", { class: "card-head" },
+      h("div", {}, h("h3", {}, o.title), o.desc ? h("p", { html: o.desc }) : null),
+      o.tools || null),
+    ...body,
+    o.foot ? h("div", { class: "card-foot", html: o.foot }) : null);
+}
+function chartBox(draw, cls) { return mount(h("div", { class: "chart " + (cls || "") }), draw); }
+function segToggle(options, active, onChange) {
+  const wrap = h("div", { class: "seg", role: "group" });
+  options.forEach(([key, label]) => {
+    const b = h("button", { type: "button", class: key === active ? "on" : "", "aria-pressed": key === active ? "true" : "false" }, label);
+    b.addEventListener("click", () => {
+      $$("button", wrap).forEach((x) => { x.classList.remove("on"); x.setAttribute("aria-pressed", "false"); });
+      b.classList.add("on");
+      b.setAttribute("aria-pressed", "true");
+      onChange(key);
+    });
+    wrap.append(b);
+  });
+  return wrap;
+}
+function table(cols, rows) {
+  // cols: [{label, num, fmt}] rows: arrays of raw values
+  return h("div", { class: "tbl-wrap" },
+    h("table", { class: "tbl" },
+      h("thead", {}, h("tr", {}, cols.map((c) => h("th", { class: c.num ? "n" : "" }, c.label)))),
+      h("tbody", {}, rows.map((r) => h("tr", {}, r.map((v, i) => {
+        const c = cols[i];
+        const td = h("td", { class: (c.num ? "n" : "") + (c.wrap ? " wrap" : "") });
+        if (v instanceof Node) td.append(v); else td.innerHTML = c.fmt ? c.fmt(v) : c.html ? v : esc(v == null ? "" : v);
+        return td;
+      }))))));
+}
+const SQL_KW = /\b(SELECT|FROM|WHERE|AND|OR|NOT|IN|AS|JOIN|LEFT|ON|GROUP|BY|ORDER|WITH|CASE|WHEN|THEN|ELSE|END|BETWEEN|OVER|PARTITION|DISTINCT|HAVING|LIMIT|UNION|ALL|IS|NULL|TRUE|FALSE|QUALIFY|DESC|ASC|INNER|USING|LATERAL|INTERVAL)\b/g;
+const SQL_FN = /\b(COUNT|COUNT_IF|SUM|AVG|MEDIAN|MIN|MAX|ROUND|DATEADD|DATEDIFF|DATE_TRUNC|LEAD|LAG|IFF|COALESCE|SQRT|PERCENTILE_CONT|APPROX_PERCENTILE|ROW_NUMBER|DAYOFWEEKISO|HOUR|DIV0|ANY_VALUE|BOOLOR_AGG)\b(?=\s*\()/g;
+function highlightSQL(src) {
+  return src.split("\n").map((line) => {
+    const ci = line.indexOf("--");
+    let code = ci >= 0 ? line.slice(0, ci) : line, cm = ci >= 0 ? line.slice(ci) : "";
+    code = esc(code).replace(/('[^']*')/g, "\u0001$1\u0002");
+    const parts = code.split(/(\u0001[^\u0002]*\u0002)/);
+    code = parts.map((p) => p.startsWith("\u0001") ? `<span class="str">${p.slice(1, -1)}</span>` :
+      p.replace(SQL_FN, '<span class="fn">$1</span>').replace(SQL_KW, '<span class="kw">$1</span>')).join("");
+    return code + (cm ? `<span class="cm">${esc(cm)}</span>` : "");
+  }).join("\n");
+}
+function sqlBlock(q, open) {
+  return h("details", { class: "sql", open: open ? "" : null },
+    h("summary", {}, h("span", { class: "sum-title" }, q.title), q.value ? h("span", { class: "sum-val" }, q.value) : null),
+    q.def ? h("div", { class: "sql-def", html: q.def }) : null,
+    h("pre", { class: "code", html: highlightSQL(q.sql) }));
+}
+function dictionary(stages) {
+  const route = h("div", { class: "stage-route" });
+  stages.forEach((s, i) => { if (i) route.append(h("i")); route.append(h("span", {}, s.stage)); });
+  const grid = h("div", { class: "dict" }, stages.map((s) => h("div", { class: "dict-stage" },
+    h("h4", {}, s.stage),
+    s.tables.map((t) => h("div", { class: "dict-table" },
+      h("div", { class: "tname" }, h("code", {}, t.name)),
+      h("div", { class: "tdesc" }, t.desc),
+      h("dl", {}, t.cols.map(([c, d]) => [h("dt", {}, h("code", {}, c)), h("dd", {}, d)]).flat()))))));
+  return h("div", {}, route, grid);
+}
+function sampleTables(samples) {
+  const names = Object.keys(samples);
+  const holder = h("div", {});
+  const show = (nm) => {
+    holder.innerHTML = "";
+    const s = samples[nm];
+    holder.append(table(s.cols.map((c) => ({ label: c, num: s.num && s.num.includes(c) })), s.rows));
+  };
+  const tog = segToggle(names.map((n) => [n, n]), names[0], show);
+  show(names[0]);
+  return { tools: tog, body: holder };
+}
+
+/* ---------- shell: rail route navigation ---------- */
+function initShell(views) {
+  const nav = $("#route");
+  const byId = {};
+  views.forEach((v, i) => {
+    byId[v.id] = v;
+    nav.append(h("li", { class: "stop", "data-v": v.id },
+      h("a", { href: "#" + v.id }, h("span", { class: "dot" }), h("span", { class: "lbl" }, v.title, h("small", {}, v.blurb)))));
+  });
+  function show(id) {
+    if (!byId[id]) id = views[0].id;
+    const idx = views.findIndex((v) => v.id === id);
+    $$(".stop", nav).forEach((li, i) => {
+      li.classList.toggle("active", i === idx);
+      li.classList.toggle("passed", i < idx);
+      li.querySelector("a").setAttribute("aria-current", i === idx ? "page" : "false");
+    });
+    views.forEach((v) => { $("#v-" + v.id).hidden = v.id !== id; });
+    const v = byId[id];
+    $("#view-title").textContent = v.title;
+    $("#view-desc").textContent = v.desc;
+    const panel = $("#v-" + id);
+    if (!panel._built) { v.build(panel); panel._built = true; }
+    paint(panel);
+    const li = $$(".stop", nav)[idx];
+    if (nav.scrollWidth > nav.clientWidth) nav.scrollLeft = li.offsetLeft - nav.clientWidth / 2 + li.offsetWidth / 2;
+  }
+  window.addEventListener("hashchange", () => { show(location.hash.slice(1)); window.scrollTo(0, 0); });
+  let rt = null;
+  window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => paint($(".view:not([hidden])")), 120); });
+  document.body.append(TIP);
+  show(location.hash.slice(1));
+}
+</script>
+<script>
+"use strict";
+const D = JSON.parse(document.getElementById("data").textContent);
+const RC = D.recovery, MD = D.midday, AL = D.alternatives, ON = D.onboarding;
+const MT = MD.groups.test, MC = MD.groups.control;
+const SIX = ON.variants.six_screen, FOUR = ON.variants.four_screen;
+const ciTxt = (e) => `95% CI ${fmt.pts(e.lo)} to ${fmt.pts(e.hi)}`;
+const pTxt = (p) => (p < 0.001 ? "p < 0.001" : "p = " + p.toFixed(3));
+const sig = (e) => e.lo > 0 || e.hi < 0;
+const typeOf = (t) => AL.by_type.find((x) => x.type === t);
+const BEST = typeOf(AL.best);
+const ALT_CLS = { later_pickup: "c1", nearby_point: "c2", shared_walk: "c4" };
+const ALT_VAR = { later_pickup: "--accent", nearby_point: "--signal", shared_walk: "--muted" };
+
+document.getElementById("rail-meta").textContent =
+  `May 1 to Oct 31 2026 · 4 tests · ${fmt.int(D.meta.riders)} rider accounts`;
+
+/* ---------- experiment calendar on the route motif ---------- */
+const T0 = Date.UTC(2026, 4, 1), T1 = Date.UTC(2026, 9, 31);
+const tday = (iso) => { const p = iso.split("-").map(Number); return (Date.UTC(p[0], p[1] - 1, p[2]) - T0) / 864e5; };
+const CAL = [
+  { name: "“No car available” alternatives", segs: [[D.alternatives.start, "2026-10-31", "run"]], stops: [D.alternatives.start, "2026-10-31"], note: "Every unfilled request since Jun 1" },
+  { name: "Midday discount", segs: [["2026-06-01", "2026-06-28", "pre"], ["2026-06-29", "2026-08-23", "run"]], stops: ["2026-06-29", "2026-08-23"], note: "4 pre weeks, 8 test weeks" },
+  { name: "Onboarding: 4 vs 6 screens", segs: [[ON.start, ON.end, "run"], [ON.end, "2026-10-18", "pre"]], stops: [ON.start, ON.end], note: "10 weekly cohorts, 7-day follow-up" },
+  { name: "Recovery campaign", segs: [[RC.send, "2026-09-15", "run"]], stops: [RC.send, "2026-09-15"], note: "Sent Aug 17, 30-day window" },
+];
+function calendarChart(c, w) {
+  const narrow = w < 640, lw = narrow ? 0 : 230, rh = narrow ? 64 : 50, top = 26;
+  const H = top + CAL.length * rh + 8;
+  const svg = svgRoot(c, w, H);
+  const x = lin(0, tday("2026-10-31"), lw + 10, w - 14);
+  const g = sv("g", { class: "ax" }, svg);
+  for (let m = 4; m <= 9; m++) {
+    const d = (Date.UTC(2026, m, 1) - T0) / 864e5;
+    sv("line", { x1: x(d), x2: x(d), y1: 14, y2: H - 4, class: "gridln" }, g);
+    stext(g, x(d) + 4, 12, MON[m], "", "start");
+  }
+  CAL.forEach((e, i) => {
+    const cy = top + i * rh + (narrow ? 38 : rh / 2);
+    if (narrow) stext(svg, 10, cy - 18, e.name, "lbl-ink", "start", { "font-weight": 600 });
+    else { stext(svg, lw - 4, cy, e.name, "lbl-ink", "end", { "font-weight": 600 }); stext(svg, lw - 4, cy + 15, e.note, "lbl-mut", "end"); }
+    e.segs.forEach(([a, b, kind]) => {
+      sv("rect", { x: x(tday(a)), y: cy - (kind === "run" ? 5 : 2), width: Math.max(2, x(tday(b)) - x(tday(a))), height: kind === "run" ? 10 : 4, rx: 3,
+        class: kind === "run" ? "route-main" : "c4", "fill-opacity": kind === "run" ? 1 : 0.45 }, svg);
+    });
+    e.stops.forEach((s) => sv("circle", { cx: x(tday(s)), cy, r: 7, class: "route-stop", "stroke-width": 3.5, "data-tip": `<b>${esc(e.name)}</b><br>${dlabel(s, true)}` }, svg));
+  });
+  return svg;
+}
+
+/* ---------- Overview ---------- */
+function buildOverview(p) {
+  p.append(h("div", { class: "kpis" },
+    kpiTile({ label: "Recovery lift", value: fmt.pts(RC.effect.diff), sub: `${fmt.pct(RC.arms.treatment.rate)} with the offer vs ${fmt.pct(RC.arms.control.rate)} held out` }),
+    kpiTile({ label: "Midday share lift", value: fmt.pts(MD.share_did), sub: "Weekday rides starting 10:00 to 14:59, test vs control districts" }),
+    kpiTile({ label: "Unfilled rush requests", value: fmt.signedPct(MD.unf_net), sub: "Weekday rush hours in test districts, net of the control trend" }),
+    kpiTile({ label: "Best alternative", value: fmt.pct(BEST.rate), sub: `${esc(BEST.label)} accepted after “No car available”` }),
+    kpiTile({ label: "Onboarding lift", value: fmt.pts(ON.effect.diff), sub: `7-day first ride: 4 screens ${fmt.pct(FOUR.ride7.rate)} vs 6 screens ${fmt.pct(SIX.ride7.rate)}` })));
+  const pill = (txt, cls) => h("span", { class: "tag " + cls }, txt);
+  const rows = (pairs) => h("dl", { class: "note", style: "display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0 0 10px" },
+    pairs.map(([k, v]) => [h("dt", { style: "font-weight:600;color:var(--ink)" }, k), h("dd", { style: "margin:0", html: v })]).flat());
+  const g = h("div", { class: "grid" },
+    card({ title: "Test calendar", span: "s12", desc: "Each line is a test running on the route. Filled stops mark the start and end of the treatment window; thin grey lines show baseline or follow-up time." },
+      chartBox(calendarChart)),
+    card({ title: "Recovery campaign", tools: pill(sig(RC.effect) ? "Clear lift" : "No clear effect", sig(RC.effect) ? "ok" : ""), foot: "Details on the Recovery campaign stop" },
+      rows([["Who", `${fmt.int(RC.targeted)} riders with no ride in 30+ days`], ["Split", "70% offer, 30% held out, at random"], ["Measure", "Completed ride within 30 days of the send"]]),
+      chartBox((c, w) => ciChart(c, w, { rows: [
+        { label: "Offer", est: RC.arms.treatment.rate, lo: RC.arms.treatment.lo, hi: RC.arms.treatment.hi, cls: "c1" },
+        { label: "Held out", est: RC.arms.control.rate, lo: RC.arms.control.lo, hi: RC.arms.control.hi, cls: "c4" }], min: 0 })),
+      h("div", { class: "callout", html: `Lift <b>${fmt.pts(RC.effect.diff)}</b> (${ciTxt(RC.effect)}, ${pTxt(RC.effect.p)}).` })),
+    card({ title: "Midday discount", tools: pill("Directional: 8 districts", "warn"), foot: "Details on the Midday discount stop" },
+      rows([["Who", "Weekday riders in 4 test districts"], ["Split", "Coin flip within 4 matched district pairs"], ["Measure", "Midday ride share, and unfilled rush-hour requests per week"]]),
+      table([{ label: "Group" }, { label: "Midday", num: 1 }, { label: "Unfilled/wk", num: 1 }],
+        [["Test, before", fmt.pct(MT.share_pre), fmt.int(MT.unf_week_pre)], ["Test, during", fmt.pct(MT.share_test), fmt.int(MT.unf_week_test)],
+         ["Control, before", fmt.pct(MC.share_pre), fmt.int(MC.unf_week_pre)], ["Control, during", fmt.pct(MC.share_test), fmt.int(MC.unf_week_test)]]),
+      h("div", { class: "callout", html: `Midday share <b>${fmt.pts(MD.share_did)}</b> and unfilled rush-hour requests <b>${fmt.signedPct(MD.unf_net)}</b>, both net of the control districts.` })),
+    card({ title: "“No car available” alternatives", tools: pill("Clear ranking", "ok"), foot: "Details on the Alternatives stop" },
+      rows([["Who", `${fmt.int(AL.offers)} unfilled requests since Jun 1`], ["Split", "One alternative per request, picked at random"], ["Measure", "Share of offers the rider accepted"]]),
+      chartBox((c, w) => ciChart(c, w, { rows: AL.by_type.map((t) => ({ label: t.label, est: t.rate, lo: t.lo, hi: t.hi, cls: ALT_CLS[t.type] })), min: 0 }))),
+    card({ title: "Onboarding: 4 vs 6 screens", tools: pill(sig(ON.effect) ? "Clear lift" : "No clear effect", sig(ON.effect) ? "ok" : ""), foot: "Details on the Onboarding stop" },
+      rows([["Who", `${fmt.int(SIX.ride7.n + FOUR.ride7.n)} sign-up starts, Aug 3 to Oct 11`], ["Split", "50/50 at random"], ["Measure", "Completed first ride within 7 days of starting sign-up"]]),
+      chartBox((c, w) => ciChart(c, w, { rows: [
+        { label: "4 screens", est: FOUR.ride7.rate, lo: FOUR.ride7.lo, hi: FOUR.ride7.hi, cls: "c1" },
+        { label: "6 screens", est: SIX.ride7.rate, lo: SIX.ride7.lo, hi: SIX.ride7.hi, cls: "c4" }], min: 0 })),
+      h("div", { class: "callout", html: `Lift <b>${fmt.pts(ON.effect.diff)}</b> (${ciTxt(ON.effect)}, ${pTxt(ON.effect.p)}).` })));
+  p.append(g);
+}
+
+/* ---------- Recovery ---------- */
+function buildRecovery(p) {
+  const A = RC.arms, E = RC.effect;
+  p.append(h("div", { class: "kpis" },
+    kpiTile({ label: "Riders targeted", value: fmt.int(RC.targeted), sub: `<b>${fmt.int(A.treatment.n)}</b> got the offer, <b>${fmt.int(A.control.n)}</b> held out` }),
+    kpiTile({ label: "Rebooked with the offer", value: fmt.pct(A.treatment.rate), sub: `${fmt.int(A.treatment.k)} riders, CI ${fmt.pct(A.treatment.lo)} to ${fmt.pct(A.treatment.hi)}` }),
+    kpiTile({ label: "Rebooked, held out", value: fmt.pct(A.control.rate), sub: `${fmt.int(A.control.k)} riders, CI ${fmt.pct(A.control.lo)} to ${fmt.pct(A.control.hi)}`, tone: "muted" }),
+    kpiTile({ label: "Lift", value: fmt.pts(E.diff), sub: `${ciTxt(E)}. Relative ${fmt.signedPct(E.rel, 0)}` }),
+    kpiTile({ label: "Extra riders back", value: fmt.int(RC.extra_riders), sub: "Offer group size times the lift" })));
+  const days = Array.from({ length: 30 }, (_, i) => i);
+  const B = RC.buckets;
+  const g = h("div", { class: "grid" },
+    card({ title: "30-day rebook rate by arm", desc: "Dot: rebook rate. Whiskers: 95% confidence interval.", foot: "Source: <code>recovery_sends</code> joined to <code>rides</code>" },
+      chartBox((c, w) => ciChart(c, w, { rows: [
+        { label: "Got the offer", sub: `n = ${fmt.int(A.treatment.n)}`, est: A.treatment.rate, lo: A.treatment.lo, hi: A.treatment.hi, cls: "c1" },
+        { label: "Held out", sub: `n = ${fmt.int(A.control.n)}`, est: A.control.rate, lo: A.control.lo, hi: A.control.hi, cls: "c4" }], min: 0, rowH: 54 })),
+      h("div", { class: "callout", html: `The offer group rebooked at <b>${fmt.pct(A.treatment.rate)}</b> against <b>${fmt.pct(A.control.rate)}</b> for riders held out: a lift of <b>${fmt.pts(E.diff)}</b> (${ciTxt(E)}, ${pTxt(E.p)}).` })),
+    card({ title: "When riders came back", desc: "Cumulative share of each arm with a completed ride, by days since the send.", foot: "Day 0 = Aug 17" },
+      legend([{ label: "Got the offer", color: "--accent" }, { label: "Held out", color: "--muted" }]),
+      chartBox((c, w) => lineChart(c, w, { height: 230, x: days, xFmt: (d) => "Day " + d, yMin: 0, yFmt: (v) => fmt.pct(v, 0),
+        series: [{ values: RC.cumulative.treatment, cls: "c1", area: true }, { values: RC.cumulative.control, cls: "c4" }],
+        tip: (i) => `<b>Day ${i}</b><br>Offer: ${fmt.pct(RC.cumulative.treatment[i])}<br>Held out: ${fmt.pct(RC.cumulative.control[i])}` }))),
+    card({ title: "Lift by time since last ride", desc: "Difference in rebook rate, offer minus held out, with 95% CI. The dashed line is no effect.", foot: "Groups by days between the last completed ride and Aug 17" },
+      chartBox((c, w) => ciChart(c, w, { rows: B.map((b) => ({ label: b.label, sub: `n = ${fmt.int(b.treatment.n + b.control.n)}`, est: b.effect.diff, lo: b.effect.lo, hi: b.effect.hi, cls: sig(b.effect) ? "c1" : "c2",
+        tip: `<b>${b.label}</b><br>Offer ${fmt.pct(b.treatment.rate)} vs held out ${fmt.pct(b.control.rate)}<br>Lift ${fmt.pts(b.effect.diff)} (${ciTxt(b.effect)})` })),
+        zero: true, fmt: (v) => fmt.pts(v), tickFmt: (v) => fmt.pts(v, 0), rowH: 54 }))),
+    card({ title: "Rebook rate by group", desc: "Recently lapsed riders come back most often. The offer adds riders in every group.", foot: "Wald 95% confidence intervals" },
+      table([{ label: "Last ride" }, { label: "Offer", num: 1, html: 1 }, { label: "Held out", num: 1, html: 1 }, { label: "Lift", num: 1 }, { label: "95% CI", num: 1 }],
+        B.map((b) => [b.label, `${fmt.pct(b.treatment.rate)} <span class="note">(${fmt.int(b.treatment.n)})</span>`, `${fmt.pct(b.control.rate)} <span class="note">(${fmt.int(b.control.n)})</span>`,
+          fmt.pts(b.effect.diff), `${fmt.pts(b.effect.lo)} to ${fmt.pts(b.effect.hi)}`]))));
+  p.append(g);
+}
+
+/* ---------- Midday ---------- */
+function buildMidday(p) {
+  const wk = MD.weeks, band = [{ from: MD.pre_weeks, to: wk.length - 1, label: "Discount on in test districts" }];
+  p.append(h("div", { class: "kpis" },
+    kpiTile({ label: "Midday share, test districts", value: fmt.pct(MT.share_test), sub: `Up from ${fmt.pct(MT.share_pre)} before the test` }),
+    kpiTile({ label: "Midday share, control", value: fmt.pct(MC.share_test), sub: `${fmt.pct(MC.share_pre)} before the test`, tone: "muted" }),
+    kpiTile({ label: "Midday share lift", value: fmt.pts(MD.share_did), sub: "Difference-in-differences" }),
+    kpiTile({ label: "Unfilled rush requests", value: fmt.signedPct(MD.unf_net), sub: `Test ${fmt.signedPct(MD.unf_change_test)}, control ${fmt.signedPct(MD.unf_change_control)} vs before` })));
+  const tipW = (i) => `<b>Week of ${dlabel(wk[i])}</b>${i >= MD.pre_weeks ? " (test)" : " (before)"}`;
+  const g = h("div", { class: "grid" },
+    card({ title: "Midday ride share by week", desc: "Share of weekday completed rides that start 10:00 to 14:59.", foot: "Source: <code>rides</code>, <code>booking_requests</code>, <code>midday_test_districts</code>" },
+      legend([{ label: "Test districts", color: "--accent" }, { label: "Control districts", color: "--muted" }]),
+      chartBox((c, w) => lineChart(c, w, { height: 240, x: wk, xFmt: (d) => dlabel(d), yFmt: (v) => fmt.pct(v, 0), bands: band,
+        series: [{ values: MT.share, cls: "c1", dots: true }, { values: MC.share, cls: "c4", dots: true }],
+        tip: (i) => `${tipW(i)}<br>Test: ${fmt.pct(MT.share[i])}<br>Control: ${fmt.pct(MC.share[i])}` }))),
+    card({ title: "Unfilled rush-hour requests by week", desc: "Indexed to each group's average before the test (= 100), so groups of different size compare fairly.", foot: "Source: <code>booking_requests</code>, weekdays 07:00 to 09:59 and 16:00 to 18:59" },
+      legend([{ label: "Test districts", color: "--accent" }, { label: "Control districts", color: "--muted" }]),
+      chartBox((c, w) => lineChart(c, w, { height: 240, x: wk, xFmt: (d) => dlabel(d), yMin: 0, yFmt: (v) => String(v), bands: band, refs: [{ y: 100, label: "Before-test average" }],
+        series: [{ values: MT.unfilled_index, cls: "c1", dots: true }, { values: MC.unfilled_index, cls: "c4", dots: true }],
+        tip: (i) => `${tipW(i)}<br>Test: ${fmt.int(MT.unfilled_rush[i])} unfilled (index ${Math.round(MT.unfilled_index[i])})<br>Control: ${fmt.int(MC.unfilled_rush[i])} unfilled (index ${Math.round(MC.unfilled_index[i])})` }))),
+    card({ title: "Before and during the test", span: "s7", desc: "Weekdays. Before: Jun 1 to Jun 28. During: Jun 29 to Aug 23.", foot: "Unfilled per week is an average over the period's weeks" },
+      table([{ label: "Group" }, { label: "Period" }, { label: "Midday share", num: 1 }, { label: "Rush unfilled / wk", num: 1 }, { label: "Rush fill rate", num: 1 }],
+        [["Test", "Before", fmt.pct(MT.share_pre), fmt.int(MT.unf_week_pre), fmt.pct(MT.rush_fill_pre)],
+         ["Test", "During", fmt.pct(MT.share_test), fmt.int(MT.unf_week_test), fmt.pct(MT.rush_fill_test)],
+         ["Control", "Before", fmt.pct(MC.share_pre), fmt.int(MC.unf_week_pre), fmt.pct(MC.rush_fill_pre)],
+         ["Control", "During", fmt.pct(MC.share_test), fmt.int(MC.unf_week_test), fmt.pct(MC.rush_fill_test)]]),
+      h("div", { class: "callout amber", html: "Only 8 districts were split, so treat these as directional. The weekly lines show how much each week moves on its own." })),
+    card({ title: "How districts were split", span: "s5", desc: "Districts were paired by size and location, then a coin flip picked the test district in each pair.", foot: "Source: <code>midday_test_districts</code>" },
+      table([{ label: "Pair" }, { label: "Test (discount)" }, { label: "Control" }], MD.pairs.map((x, i) => [String(i + 1), x.test, x.control]))));
+  p.append(g);
+}
+
+/* ---------- Alternatives ---------- */
+function buildAlternatives(p) {
+  const done = AL.by_type.reduce((a, t) => a + t.completed, 0);
+  p.append(h("div", { class: "kpis" },
+    kpiTile({ label: "Alternatives offered", value: fmt.int(AL.offers), sub: "One per unfilled request, Jun 1 to Oct 31" }),
+    kpiTile({ label: "Accepted", value: fmt.pct(AL.rate), sub: `<b>${fmt.int(AL.accepted)}</b> offers taken` }),
+    kpiTile({ label: "Rides completed", value: fmt.int(done), sub: "Trips that would have been lost" }),
+    kpiTile({ label: "Best performer", value: fmt.pct(BEST.rate), sub: `${esc(BEST.label)}, ${fmt.pts(AL.best_vs_worst.diff)} over the weakest option` })));
+  const W = AL.weekly;
+  const bands = [["weekday_rush", "Weekday rush"], ["other", "Other times"]];
+  const g = h("div", { class: "grid" },
+    card({ title: "Acceptance rate by alternative", desc: "Dot: share of offers accepted. Whiskers: 95% confidence interval.", foot: "Source: <code>alt_offers</code>" },
+      chartBox((c, w) => ciChart(c, w, { rows: AL.by_type.map((t) => ({ label: t.label, sub: `${fmt.int(t.n)} offers`, est: t.rate, lo: t.lo, hi: t.hi, cls: ALT_CLS[t.type] })), min: 0, rowH: 54 }))),
+    card({ title: "Rush hour changes the answer", desc: "Riders in the weekday rush often cannot wait, so a later pickup loses its lead there.", foot: "Rush: weekdays 07:00 to 09:59 and 16:00 to 18:59" },
+      legend(AL.by_type.map((t) => ({ label: t.label, color: ALT_VAR[t.type], dot: true }))),
+      chartBox((c, w) => barChart(c, w, { labels: bands.map((b) => b[1]), height: 230, yFmt: (v) => fmt.pct(v, 0), valueLabels: true, vFmt: (v) => fmt.pct(v, 0), gap: 0.3,
+        series: AL.by_type.map((t) => ({ values: bands.map((b) => t[b[0]].rate), cls: ALT_CLS[t.type] })),
+        tip: (i, j) => { const t = AL.by_type[j], x = t[bands[i][0]]; return `<b>${esc(t.label)}, ${bands[i][1].toLowerCase()}</b><br>${fmt.pct(x.rate)} of ${fmt.int(x.n)} offers (CI ${fmt.pct(x.lo)} to ${fmt.pct(x.hi)})`; } }))),
+    card({ title: "Weekly acceptance by alternative", span: "s8", desc: "Share of offers accepted each week.", foot: "Source: <code>alt_offers</code>" },
+      legend(AL.by_type.map((t) => ({ label: t.label, color: ALT_VAR[t.type] }))),
+      chartBox((c, w) => lineChart(c, w, { height: 240, x: W.weeks, xFmt: (d) => dlabel(d), yMin: 0, yFmt: (v) => fmt.pct(v, 0),
+        series: AL.by_type.map((t) => ({ values: W[t.type], cls: ALT_CLS[t.type] })),
+        tip: (i) => `<b>Week of ${dlabel(W.weeks[i])}</b><br>${fmt.int(W.offers[i])} offers, ${fmt.int(W.accepted[i])} accepted<br>` + AL.by_type.map((t) => `${esc(t.label)}: ${fmt.pct(W[t.type][i])}`).join("<br>") }))),
+    card({ title: "What riders get", span: "s4", desc: "Completed rides from accepted offers.", foot: "Source: <code>rides</code> where <code>ride_type = 'alternative'</code>" },
+      table([{ label: "Alternative" }, { label: "Rides", num: 1, fmt: fmt.int }, { label: "Median wait", num: 1, fmt: (v) => fmt.min(v) }],
+        AL.by_type.map((t) => [t.label, t.completed, t.median_wait]))));
+  p.append(g);
+}
+
+/* ---------- Onboarding ---------- */
+function buildOnboarding(p) {
+  const E = ON.effect;
+  p.append(h("div", { class: "kpis" },
+    kpiTile({ label: "Sign-up starts in test", value: fmt.int(SIX.ride7.n + FOUR.ride7.n), sub: `${fmt.int(FOUR.ride7.n)} saw 4 screens, ${fmt.int(SIX.ride7.n)} saw 6` }),
+    kpiTile({ label: "First ride in 7 days, 4 screens", value: fmt.pct(FOUR.ride7.rate), sub: `CI ${fmt.pct(FOUR.ride7.lo)} to ${fmt.pct(FOUR.ride7.hi)}` }),
+    kpiTile({ label: "First ride in 7 days, 6 screens", value: fmt.pct(SIX.ride7.rate), sub: `CI ${fmt.pct(SIX.ride7.lo)} to ${fmt.pct(SIX.ride7.hi)}`, tone: "muted" }),
+    kpiTile({ label: "Lift", value: fmt.pts(E.diff), sub: `${ciTxt(E)}, ${pTxt(E.p)}` })));
+  const funnel = (v) => chartBox((c, w) => routeFunnel(c, w, { stages: v.stages.map((s) => ({ label: s.label, n: s.n, tip: `<b>${esc(s.label)}</b><br>${fmt.int(s.n)} (${fmt.pct(s.n / v.stages[0].n)} of starts)` })), compact: true, thin: true, minHorizontal: 700, padL: 54, padR: 60 }));
+  const coh = (v) => v.cohorts.map((c) => c.rate);
+  const wk = FOUR.cohorts.map((c) => c.week);
+  const row = (lab, a, b) => [lab, fmt.pct(a.rate), fmt.pct(b.rate), fmt.pts(b.rate - a.rate)];
+  const g = h("div", { class: "grid" },
+    card({ title: "Sign-up route, screen by screen", span: "s12", desc: "Percent of sign-up starts that reach each stop. The 4-screen flow drops the name, address and notification screens and asks for them later.", foot: "Source: <code>onboarding_sessions</code>, <code>booking_requests</code>, <code>rides</code>" },
+      h("h4", { class: "eyebrow", style: "margin:4px 0 0" }, "6 screens (current)"), funnel(SIX),
+      h("h4", { class: "eyebrow", style: "margin:14px 0 0" }, "4 screens (test)"), funnel(FOUR)),
+    card({ title: "7-day first-ride rate by weekly cohort", span: "s7", desc: "Each point is the sign-ups that started in that week.", foot: "Cohorts Aug 3 to Oct 11, each followed for 7 days" },
+      legend([{ label: "4 screens", color: "--accent" }, { label: "6 screens", color: "--muted" }]),
+      chartBox((c, w) => lineChart(c, w, { height: 240, x: wk, xFmt: (d) => dlabel(d), yFmt: (v) => fmt.pct(v, 0),
+        series: [{ values: coh(FOUR), cls: "c1", dots: true }, { values: coh(SIX), cls: "c4", dots: true }],
+        tip: (i) => `<b>Week of ${dlabel(wk[i])}</b><br>4 screens: ${fmt.pct(FOUR.cohorts[i].rate)} (n ${fmt.int(FOUR.cohorts[i].n)})<br>6 screens: ${fmt.pct(SIX.cohorts[i].rate)} (n ${fmt.int(SIX.cohorts[i].n)})` }))),
+    card({ title: "Where the gain comes from", span: "s5", desc: "Shares of sign-up starts, except the last row.", foot: "Wald 95% CIs on the KPI tiles" },
+      table([{ label: "Stop" }, { label: "6 screens", num: 1 }, { label: "4 screens", num: 1 }, { label: "Change", num: 1 }],
+        [row("Account created", SIX.account, FOUR.account), row("Booked within 7 days", SIX.booked7, FOUR.booked7), row("First ride within 7 days", SIX.ride7, FOUR.ride7),
+         row("First ride, of accounts", SIX.ride7_given_account, FOUR.ride7_given_account)]),
+      h("div", { class: "callout", html: `The shorter flow creates far more accounts (${fmt.pts(ON.account_effect.diff)}). A smaller share of those accounts ride in the first week, but the net gain per sign-up start is still <b>${fmt.pts(E.diff)}</b>.` })));
+  p.append(g);
+}
+
+/* ---------- Data & SQL ---------- */
+function buildData(p) {
+  const Q = D.docs.sql;
+  const qs = [
+    { title: "Recovery campaign: rebook rate by arm", value: `${fmt.pct(RC.arms.treatment.rate)} vs ${fmt.pct(RC.arms.control.rate)}`, sql: Q.recovery, def: "Lift and its CI come from the two arm rates: difference ± 1.96 × the square root of the summed variances." },
+    { title: "Midday discount: midday ride share", value: fmt.pts(MD.share_did), sql: Q.midday, def: "Lift = (test during − test before) − (control during − control before)." },
+    { title: "Midday discount: unfilled rush-hour requests", value: fmt.signedPct(MD.unf_net), sql: Q.rush, def: "Net change = (test during / test before) ÷ (control during / control before) − 1, on weekly averages." },
+    { title: "Alternatives: acceptance by type", value: `${fmt.pct(BEST.rate)} best`, sql: Q.alternatives },
+    { title: "Onboarding: 7-day first-ride rate", value: `${fmt.pct(FOUR.ride7.rate)} vs ${fmt.pct(SIX.ride7.rate)}`, sql: Q.onboarding },
+  ];
+  const smp = sampleTables(D.samples);
+  p.append(h("div", { class: "grid" },
+    card({ title: "Data dictionary", span: "s12", desc: "The tables behind these tests, grouped by stage of the rider journey. Excerpt: key columns only." }, dictionary(D.docs.dictionary)),
+    card({ title: "SQL behind each result", span: "s12", desc: "Snowflake SQL for every headline on the Overview. Open a block to read it." }, qs.map((q, i) => sqlBlock(q, i === 0))),
+    card({ title: "Sample rows", span: "s12", tools: smp.tools, desc: "A small random sample of raw rows from each table.", foot: "Synthetic rows. IDs do not refer to real people or trips." }, smp.body)));
+}
+
+initShell([
+  { id: "overview", title: "Overview", blurb: "All four tests", desc: "Four tests on the rider journey: what we changed, who saw it, and what moved.", build: buildOverview },
+  { id: "recovery", title: "Recovery campaign", blurb: "Bringing lapsed riders back", desc: "Lapsed riders got a ride offer on Aug 17. A random 30% were held out so the lift can be measured.", build: buildRecovery },
+  { id: "midday", title: "Midday discount", blurb: "Shifting rides off the peak", desc: "A weekday midday discount in four districts, to move flexible riders out of the rush and free up cars when they run short.", build: buildMidday },
+  { id: "alternatives", title: "Alternatives", blurb: "After “No car available”", desc: "When no car is free, riders see one alternative. Which one do they take?", build: buildAlternatives },
+  { id: "onboarding", title: "Onboarding", blurb: "4 screens vs 6", desc: "A shorter sign-up flow against the current one, judged on first rides within 7 days.", build: buildOnboarding },
+  { id: "data", title: "Data & SQL", blurb: "Tables, queries, rows", desc: "Plain-language table definitions, the SQL behind each result, and a sample of raw rows.", build: buildData },
+]);
+</script>
+</body>
+</html>
